@@ -1,0 +1,41 @@
+# Logs
+backend/server.log
+backend/server_err.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Environment variables — NEVER commit (contains API keys)
+backend/.env
+
+# Database
+backend/*.db
+backend/*.sqlite
+
+# Model cache — gigabytes, not for GitHub
+backend/model_cache/
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
