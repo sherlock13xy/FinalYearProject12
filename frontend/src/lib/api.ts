@@ -1,6 +1,15 @@
 import axios from 'axios'
 import { SingleAnalysisResponse, BulkAnalysisResponse, AnalyticsData, HistoryRecord, URLAnalysisResponse } from '@/types'
 
+const _downloadPdf = (blob: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  window.URL.revokeObjectURL(url)
+}
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1',
   timeout: 120000,
@@ -60,6 +69,24 @@ export const clearHistory = async () => {
 export const analyzeURL = async (url: string, max_comments: number = 20): Promise<URLAnalysisResponse> => {
   const { data } = await api.post('/analyze-url', { url, max_comments }, { timeout: 600000 })
   return data
+}
+
+export const exportURLAnalysisPDF = async (result: URLAnalysisResponse): Promise<void> => {
+  const response = await api.post('/export-pdf', result, { responseType: 'blob', timeout: 30000 })
+  _downloadPdf(new Blob([response.data], { type: 'application/pdf' }),
+    response.headers['content-disposition']?.split('filename=')[1] ?? 'sentiment_report.pdf')
+}
+
+export const exportSingleAnalysisPDF = async (result: SingleAnalysisResponse): Promise<void> => {
+  const response = await api.post('/export-pdf/single', result, { responseType: 'blob', timeout: 30000 })
+  _downloadPdf(new Blob([response.data], { type: 'application/pdf' }),
+    response.headers['content-disposition']?.split('filename=')[1] ?? 'sentiment_report_single.pdf')
+}
+
+export const exportBulkAnalysisPDF = async (result: BulkAnalysisResponse): Promise<void> => {
+  const response = await api.post('/export-pdf/bulk', result, { responseType: 'blob', timeout: 30000 })
+  _downloadPdf(new Blob([response.data], { type: 'application/pdf' }),
+    response.headers['content-disposition']?.split('filename=')[1] ?? 'sentiment_report_bulk.pdf')
 }
 
 export const checkHealth = async () => {

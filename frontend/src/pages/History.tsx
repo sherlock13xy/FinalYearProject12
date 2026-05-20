@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Clock, Search, Trash2, Trash, ChevronDown, ChevronUp,
-  RefreshCw, Filter, Globe, MessageSquare
+  RefreshCw, Filter, Globe, MessageSquare, AlertTriangle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
@@ -30,7 +30,7 @@ export default function History() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [clearingAll, setClearingAll] = useState(false)
-  const [confirmClear, setConfirmClear] = useState(false)
+  const [showEraseModal, setShowEraseModal] = useState(false)
 
   const fetchHistory = useCallback(async () => {
     setLoading(true)
@@ -75,11 +75,6 @@ export default function History() {
   }
 
   const handleClearAll = async () => {
-    if (!confirmClear) {
-      setConfirmClear(true)
-      setTimeout(() => setConfirmClear(false), 5000)
-      return
-    }
     setClearingAll(true)
     try {
       await clearHistory()
@@ -87,10 +82,10 @@ export default function History() {
       setTotal(0)
       setTotalPages(1)
       setCurrentPage(1)
-      setConfirmClear(false)
+      setShowEraseModal(false)
       toast.success('All history cleared')
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Failed to clear history'
+      const msg = error instanceof Error ? error.message : 'Failed to erase history'
       toast.error(msg)
     } finally {
       setClearingAll(false)
@@ -133,13 +128,12 @@ export default function History() {
           </Button>
           {total > 0 && (
             <Button
-              variant={confirmClear ? 'danger' : 'outline'}
+              variant="danger"
               size="sm"
-              onClick={handleClearAll}
-              loading={clearingAll}
+              onClick={() => setShowEraseModal(true)}
               icon={<Trash size={14} />}
             >
-              {confirmClear ? 'Confirm Clear All' : 'Clear All'}
+              Clear All
             </Button>
           )}
         </div>
@@ -517,6 +511,73 @@ export default function History() {
           </Card>
         </motion.div>
       )}
+
+      {/* Erase All confirmation modal */}
+      <AnimatePresence>
+        {showEraseModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.7)' }}
+            onClick={() => !clearingAll && setShowEraseModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={e => e.stopPropagation()}
+              className="w-full max-w-sm rounded-2xl border border-red-500/20 p-6 shadow-2xl"
+              style={{ background: 'linear-gradient(135deg, #1a0a0a 0%, #0f0f1a 100%)' }}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-500/15 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle size={20} className="text-red-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white">Clear All History</h3>
+                  <p className="text-xs text-slate-400">This action cannot be undone</p>
+                </div>
+              </div>
+
+              <p className="text-sm text-slate-300 mb-6">
+                You are about to permanently delete{' '}
+                <span className="font-semibold text-white">{total.toLocaleString()} record{total !== 1 ? 's' : ''}</span>.
+                All analysis history will be lost.
+              </p>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowEraseModal(false)}
+                  disabled={clearingAll}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium text-slate-300 border border-white/10 hover:bg-white/5 transition-colors disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleClearAll}
+                  disabled={clearingAll}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-500 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {clearingAll ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      Erasing…
+                    </>
+                  ) : (
+                    <><Trash size={14} /> Clear All</>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

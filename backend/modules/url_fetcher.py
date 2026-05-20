@@ -6,12 +6,14 @@ logger = logging.getLogger(__name__)
 
 
 def detect_platform(url: str) -> str:
-    """Return 'youtube', raise ValueError for unsupported URLs."""
+    """Return 'youtube' or 'instagram', raise ValueError for unsupported URLs."""
     host = urlparse(url.strip()).netloc.lower().removeprefix("www.")
     if host in ("youtube.com", "youtu.be", "m.youtube.com"):
         return "youtube"
+    if host in ("instagram.com", "m.instagram.com"):
+        return "instagram"
     raise ValueError(
-        "Unsupported URL. Paste a YouTube video URL (youtube.com/watch?v=... or youtu.be/...)."
+        "Unsupported URL. Paste a YouTube video URL or an Instagram post/reel URL."
     )
 
 
@@ -107,7 +109,96 @@ def fetch_youtube_comments(url: str, max_comments: int = 50) -> dict:
     }
 
 
+def _instagram_shortcode(url: str) -> str:
+    path = urlparse(url).path
+    m = re.search(r"/(?:p|reel|tv)/([A-Za-z0-9_-]+)", path)
+    if not m:
+        raise ValueError("Could not extract Instagram post shortcode from URL.")
+    return m.group(1)
+
+
+def _get_instaloader():
+    """Return an authenticated Instaloader instance, using a saved session when possible."""
+    try:
+        import instaloader
+    except ImportError:
+        raise RuntimeError("instaloader is not installed. Run: pip install instaloader")
+
+    from config import settings
+
+    username = getattr(settings, "INSTAGRAM_USERNAME", "").strip()
+    password = getattr(settings, "INSTAGRAM_PASSWORD", "").strip()
+
+    if not username or not password:
+        raise ValueError(
+            "Instagram credentials are not set. "
+            "Add INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD to your backend .env file."
+        )
+
+    L = instaloader.Instaloader()
+    session_file = f"instagram_session_{username}"
+
+    try:
+        L.load_session_from_file(username, filename=session_file)
+        logger.info("Loaded Instagram session from file.")
+    except FileNotFoundError:
+        try:
+            L.login(username, password)
+            L.save_session_to_file(filename=session_file)
+            logger.info("Instagram login successful, session saved.")
+        except instaloader.exceptions.BadCredentialsException:
+            raise ValueError("Instagram login failed: incorrect username or password.")
+        except instaloader.exceptions.TwoFactorAuthRequiredException:
+            raise ValueError(
+                "Instagram account has two-factor authentication enabled. "
+                "Disable 2FA or use an app-specific password."
+            )
+        except Exception as e:
+            raise ValueError(f"Instagram login failed: {e}")
+
+    return L, instaloader
+
+
+def fetch_instagram_comments(url: str, max_comments: int = 50) -> dict:
+    L, instaloader = _get_instaloader()
+    shortcode = _instagram_shortcode(url)
+
+    try:
+        post = instaloader.Post.from_shortcode(L.context, shortcode)
+    except instaloader.exceptions.QueryReturnedNotFoundException:
+        raise ValueError("Instagram post not found. Make sure the URL is correct and the post is public.")
+    except Exception as e:
+        raise ValueError(f"Could not fetch Instagram post: {e}")
+
+    caption = (post.caption or "").strip()
+    title = caption[:120] + ("…" if len(caption) > 120 else "") if caption else "No caption"
+    author = post.owner_username
+    total_available = post.comments
+
+    comments: list[str] = []
+    try:
+        for comment in post.get_comments():
+            text = comment.text.strip()
+            if text:
+                comments.append(text)
+            if len(comments) >= max_comments:
+                break
+    except Exception as e:
+        logger.warning("Error fetching Instagram comments: %s", e)
+
+    return {
+        "platform": "instagram",
+        "title": title,
+        "author": author,
+        "url": url,
+        "total_available": total_available,
+        "comments": comments,
+    }
+
+
 def fetch_comments(url: str, max_comments: int = 50) -> dict:
     """Detect platform and return comments + post metadata."""
-    detect_platform(url)  # raises ValueError for unsupported URLs
+    platform = detect_platform(url)  # raises ValueError for unsupported URLs
+    if platform == "instagram":
+        return fetch_instagram_comments(url, max_comments)
     return fetch_youtube_comments(url, max_comments)

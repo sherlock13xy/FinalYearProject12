@@ -1,20 +1,21 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Link2, Youtube, Search, ChevronDown, ChevronUp,
-  AlertCircle, TrendingUp, Users, BarChart2, Zap, ExternalLink,
+  Link2, Youtube, Instagram, Search, ChevronDown, ChevronUp,
+  AlertCircle, TrendingUp, Users, BarChart2, Zap, ExternalLink, Download,
 } from 'lucide-react'
 import { useAppStore } from '@/store'
-import { analyzeURL } from '@/lib/api'
+import { analyzeURL, exportURLAnalysisPDF } from '@/lib/api'
 import { BulkAnalysisItem, URLAnalysisResponse } from '@/types'
 import { cn } from '@/lib/utils'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function detectPlatform(url: string): 'youtube' | null {
+function detectPlatform(url: string): 'youtube' | 'instagram' | null {
   try {
     const host = new URL(url).hostname.replace('www.', '')
     if (['youtube.com', 'youtu.be', 'm.youtube.com'].includes(host)) return 'youtube'
+    if (['instagram.com', 'm.instagram.com'].includes(host)) return 'instagram'
   } catch { /* not a valid URL yet */ }
   return null
 }
@@ -50,6 +51,13 @@ function PlatformBadge({ platform }: { platform: string }) {
     return (
       <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-500/15 border border-red-500/30 text-red-400">
         <Youtube size={12} /> YouTube
+      </span>
+    )
+  }
+  if (platform === 'instagram') {
+    return (
+      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-pink-500/15 border border-pink-500/30 text-pink-400">
+        <Instagram size={12} /> Instagram
       </span>
     )
   }
@@ -157,6 +165,16 @@ function ResultsPanel({ result }: { result: URLAnalysisResponse }) {
   const [search, setSearch] = useState('')
   const [sentimentFilter, setSentimentFilter] = useState('all')
   const [page, setPage] = useState(0)
+  const [exporting, setExporting] = useState(false)
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await exportURLAnalysisPDF(result)
+    } finally {
+      setExporting(false)
+    }
+  }
   const PAGE_SIZE = 15
 
   const { post, aggregate, items } = result
@@ -197,10 +215,20 @@ function ResultsPanel({ result }: { result: URLAnalysisResponse }) {
             </div>
             <h2 className="text-sm font-semibold text-white leading-snug line-clamp-2">{post.title}</h2>
           </div>
-          <a href={post.url} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 flex-shrink-0">
-            <ExternalLink size={12} /> Open
-          </a>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <a href={post.url} target="_blank" rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+              <ExternalLink size={12} /> Open
+            </a>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={12} />
+              {exporting ? 'Exporting…' : 'Export PDF'}
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-4 mt-3 text-xs text-slate-500">
           <span>{post.fetched_comments} comments analysed</span>
@@ -363,7 +391,7 @@ export default function URLAnalysis() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white">URL Analysis</h1>
-        <p className="text-sm text-slate-400 mt-1">Paste a YouTube video URL to analyse its comment section.</p>
+        <p className="text-sm text-slate-400 mt-1">Paste a YouTube video or Instagram post URL to analyse its comment section.</p>
       </div>
 
       {/* Input card */}
@@ -379,7 +407,7 @@ export default function URLAnalysis() {
               value={url}
               onChange={e => setUrl(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAnalyse()}
-              placeholder="https://www.youtube.com/watch?v=..."
+              placeholder="https://www.youtube.com/watch?v=… or https://www.instagram.com/p/…"
               className="w-full pl-9 pr-32 py-2.5 text-sm rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
             />
             {platform && (
@@ -428,7 +456,8 @@ export default function URLAnalysis() {
         {!platform && !url && (
           <div className="grid grid-cols-2 gap-3 pt-1">
             {[
-              { icon: Youtube, label: 'YouTube', example: 'youtube.com/watch?v=…', color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20' },
+              { icon: Youtube,    label: 'YouTube',   example: 'youtube.com/watch?v=…',  color: 'text-red-400',  bg: 'bg-red-500/10 border-red-500/20' },
+              { icon: Instagram,  label: 'Instagram', example: 'instagram.com/p/…',       color: 'text-pink-400', bg: 'bg-pink-500/10 border-pink-500/20' },
             ].map(({ icon: Icon, label, example, color, bg }) => (
               <div key={label} className={cn('rounded-lg border p-3', bg)}>
                 <div className={cn('flex items-center gap-1.5 mb-1 text-xs font-semibold', color)}>

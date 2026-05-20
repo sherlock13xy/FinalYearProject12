@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { bulkAnalyze, uploadCSV } from '@/lib/api'
+import { bulkAnalyze, uploadCSV, exportBulkAnalysisPDF } from '@/lib/api'
 import { BulkAnalysisResponse, BulkAnalysisItem } from '@/types'
 import { getSentimentBg, getEmotionColor, capitalize, truncateText, formatConfidence } from '@/lib/utils'
 import { useAppStore } from '@/store'
@@ -29,7 +29,20 @@ export default function BulkAnalysis() {
   const [currentPage, setCurrentPage] = useState(1)
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
   const [sentimentFilter, setSentimentFilter] = useState<string>('all')
+  const [exportingPDF, setExportingPDF] = useState(false)
   const { setIsBulkAnalyzing } = useAppStore()
+
+  const handleExportPDF = async () => {
+    if (!result) return
+    setExportingPDF(true)
+    try {
+      await exportBulkAnalysisPDF(result)
+    } catch {
+      toast.error('Failed to export PDF')
+    } finally {
+      setExportingPDF(false)
+    }
+  }
   const PAGE_SIZE = 15
 
   const processCsvFile = useCallback(async (file: File) => {
@@ -225,14 +238,25 @@ export default function BulkAnalysis() {
             {loading ? 'Analyzing...' : 'Analyze All'}
           </Button>
           {result && (
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={exportCSV}
-              icon={<Download size={16} />}
-            >
-              Export CSV
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={exportCSV}
+                icon={<Download size={16} />}
+              >
+                Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={handleExportPDF}
+                loading={exportingPDF}
+                icon={<Download size={16} />}
+              >
+                {exportingPDF ? 'Exporting…' : 'Export PDF'}
+              </Button>
+            </>
           )}
         </div>
       </Card>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, RotateCcw, Clock, Hash, Type } from 'lucide-react'
+import { Sparkles, RotateCcw, Clock, Hash, Type, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Textarea } from '@/components/ui/Textarea'
 import { Button } from '@/components/ui/Button'
@@ -14,7 +14,7 @@ import { InterpretationCard } from '@/components/analysis/InterpretationCard'
 import { ResponseCard } from '@/components/analysis/ResponseCard'
 import { LanguageCard } from '@/components/analysis/LanguageCard'
 import { useAppStore } from '@/store'
-import { analyzeText } from '@/lib/api'
+import { analyzeText, exportSingleAnalysisPDF } from '@/lib/api'
 import { SingleAnalysisResponse } from '@/types'
 
 const EXAMPLE_TEXTS = [
@@ -30,7 +30,20 @@ export default function SingleAnalysis() {
   const [text, setText] = useState('')
   const [result, setResult] = useState<SingleAnalysisResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const { setLastAnalysis } = useAppStore()
+
+  const handleExport = async () => {
+    if (!result) return
+    setExporting(true)
+    try {
+      await exportSingleAnalysisPDF(result)
+    } catch {
+      toast.error('Failed to export PDF')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const handleAnalyze = async () => {
     if (!text.trim()) {
@@ -145,6 +158,19 @@ export default function SingleAnalysis() {
             exit={{ opacity: 0 }}
             className="space-y-6"
           >
+            {/* Export button */}
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExport}
+                loading={exporting}
+                icon={<Download size={14} />}
+              >
+                {exporting ? 'Exporting…' : 'Export PDF'}
+              </Button>
+            </div>
+
             {/* Stats Row */}
             <div className="grid grid-cols-3 gap-4">
               {[
