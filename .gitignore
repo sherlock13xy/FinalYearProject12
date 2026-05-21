@@ -18,6 +18,9 @@ backend/.env
 backend/*.db
 backend/*.sqlite
 
+# Instagram session files (generated at runtime)
+backend/instagram_session_*
+
 # Model cache — gigabytes, not for GitHub
 backend/model_cache/
 *.bin
