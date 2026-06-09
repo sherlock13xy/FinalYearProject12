@@ -3,8 +3,8 @@ import warnings
 
 # Must be set before any HuggingFace imports to prevent network checks when
 # all models are already cached locally.
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_OFFLINE", "0")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "0")
 warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*resume_download.*")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*_register_pytree_node.*")
@@ -55,6 +55,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(analysis.router, prefix="/api/v1")

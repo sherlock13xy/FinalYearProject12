@@ -1,6 +1,9 @@
+import os
 import re
 import logging
 from urllib.parse import urlparse, parse_qs
+
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 logger = logging.getLogger(__name__)
 
@@ -117,72 +120,85 @@ def _instagram_shortcode(url: str) -> str:
     return m.group(1)
 
 
-def _get_instaloader():
-    """Return an authenticated Instaloader instance, using a saved session when possible."""
+def _get_instagram_client():
     try:
-        import instaloader
+        from instagrapi import Client
+        from instagrapi.exceptions import LoginRequired, ChallengeRequired, BadPassword
+        import instagrapi.extractors as _extractors
     except ImportError:
-        raise RuntimeError("instaloader is not installed. Run: pip install instaloader")
+        raise RuntimeError("instagrapi is not installed. Run: python -m pip install instagrapi")
+
+    # Instagram added XDTGraphImage/XDTGraphVideo types that instagrapi's GQL
+    # parser doesn't recognise yet — patch the map so GQL succeeds instead of
+    # falling back to the private API with a logged traceback every request.
+    _extractors.MEDIA_TYPES_GQL.setdefault("XDTGraphImage", 1)   # 1 = Photo
+    _extractors.MEDIA_TYPES_GQL.setdefault("XDTGraphVideo", 2)   # 2 = Video
+    _extractors.MEDIA_TYPES_GQL.setdefault("XDTGraphSidecar", 8) # 8 = Carousel
 
     from config import settings
 
+    session_id = getattr(settings, "INSTAGRAM_SESSION_ID", "").strip()
     username = getattr(settings, "INSTAGRAM_USERNAME", "").strip()
     password = getattr(settings, "INSTAGRAM_PASSWORD", "").strip()
 
-    if not username or not password:
+    cl = Client()
+    settings_file = os.path.join(_BACKEND_DIR, "instagram_client_settings.json")
+
+    # Load previously saved client settings (device fingerprint + session)
+    if os.path.exists(settings_file):
+        cl.load_settings(settings_file)
+
+    if session_id:
+        cl.login_by_sessionid(session_id)
+        logger.info("Instagram authenticated via session ID.")
+    elif username and password:
+        try:
+            cl.login(username, password)
+            cl.dump_settings(settings_file)
+            logger.info("Instagram login successful.")
+        except ChallengeRequired:
+            raise ValueError(
+                "Instagram requires identity verification for this login. "
+                "Use the session ID method instead: log into instagram.com in Chrome, "
+                "open DevTools → Application → Cookies → instagram.com, "
+                "copy the 'sessionid' cookie value, and add INSTAGRAM_SESSION_ID=<value> to your .env file."
+            )
+        except BadPassword:
+            raise ValueError("Instagram login failed: incorrect username or password.")
+        except Exception as e:
+            raise ValueError(
+                f"Instagram login failed: {e}. "
+                "Add INSTAGRAM_SESSION_ID to your .env (from browser cookies) for reliable access."
+            )
+    else:
         raise ValueError(
-            "Instagram credentials are not set. "
-            "Add INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD to your backend .env file."
+            "No Instagram credentials set. Add INSTAGRAM_SESSION_ID to your .env file. "
+            "Get it from Chrome → instagram.com → F12 → Application → Cookies → sessionid."
         )
 
-    L = instaloader.Instaloader()
-    session_file = f"instagram_session_{username}"
-
-    try:
-        L.load_session_from_file(username, filename=session_file)
-        logger.info("Loaded Instagram session from file.")
-    except FileNotFoundError:
-        try:
-            L.login(username, password)
-            L.save_session_to_file(filename=session_file)
-            logger.info("Instagram login successful, session saved.")
-        except instaloader.exceptions.BadCredentialsException:
-            raise ValueError("Instagram login failed: incorrect username or password.")
-        except instaloader.exceptions.TwoFactorAuthRequiredException:
-            raise ValueError(
-                "Instagram account has two-factor authentication enabled. "
-                "Disable 2FA or use an app-specific password."
-            )
-        except Exception as e:
-            raise ValueError(f"Instagram login failed: {e}")
-
-    return L, instaloader
+    return cl
 
 
 def fetch_instagram_comments(url: str, max_comments: int = 50) -> dict:
-    L, instaloader = _get_instaloader()
+    cl = _get_instagram_client()
     shortcode = _instagram_shortcode(url)
 
     try:
-        post = instaloader.Post.from_shortcode(L.context, shortcode)
-    except instaloader.exceptions.QueryReturnedNotFoundException:
-        raise ValueError("Instagram post not found. Make sure the URL is correct and the post is public.")
+        from instagrapi.exceptions import MediaNotFound, MediaUnavailable
+        pk = cl.media_pk_from_code(shortcode)
+        media = cl.media_info(pk)
     except Exception as e:
         raise ValueError(f"Could not fetch Instagram post: {e}")
 
-    caption = (post.caption or "").strip()
+    caption = (media.caption_text or "").strip()
     title = caption[:120] + ("…" if len(caption) > 120 else "") if caption else "No caption"
-    author = post.owner_username
-    total_available = post.comments
+    author = media.user.username if media.user else "unknown"
+    total_available = media.comment_count or 0
 
     comments: list[str] = []
     try:
-        for comment in post.get_comments():
-            text = comment.text.strip()
-            if text:
-                comments.append(text)
-            if len(comments) >= max_comments:
-                break
+        raw = cl.media_comments(media.id, amount=max_comments)
+        comments = [c.text.strip() for c in raw if c.text.strip()]
     except Exception as e:
         logger.warning("Error fetching Instagram comments: %s", e)
 

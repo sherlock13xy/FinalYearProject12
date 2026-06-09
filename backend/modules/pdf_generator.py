@@ -49,12 +49,12 @@ class _PDF(FPDF):
 
 
 def _safe(text: str, limit: int = 200) -> str:
-    text = (text or "").replace("’", "'").replace("‘", "'") \
-                       .replace("“", '"').replace("”", '"') \
-                       .replace("…", "...").replace("–", "-") \
-                       .replace("—", "--")
+    text = (text or "")
+    text = text.replace("\u2018", "'").replace("\u2019", "'")
+    text = text.replace("\u201c", '"').replace("\u201d", '"')
+    text = text.replace("\u2026", "...").replace("\u2013", "-").replace("\u2014", "--")
+    text = text.encode("latin-1", errors="replace").decode("latin-1")
     return text[:limit] + ("..." if len(text) > limit else "")
-
 
 def generate_url_analysis_pdf(data: dict) -> bytes:
     post      = data.get("post", {})

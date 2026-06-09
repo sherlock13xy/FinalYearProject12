@@ -37,8 +37,8 @@ export default function BulkAnalysis() {
     setExportingPDF(true)
     try {
       await exportBulkAnalysisPDF(result)
-    } catch {
-      toast.error('Failed to export PDF')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export PDF')
     } finally {
       setExportingPDF(false)
     }
@@ -111,30 +111,6 @@ export default function BulkAnalysis() {
     }
   }
 
-  const exportCSV = () => {
-    if (!result) return
-    const headers = ['#', 'Text', 'Language', 'Sentiment', 'Confidence', 'Emotion', 'Tone', 'Intent', 'Interpretation']
-    const rows = result.items.map((item: BulkAnalysisItem) => [
-      item.row_number,
-      `"${item.original_text.replace(/"/g, '""')}"`,
-      item.detected_language,
-      item.sentiment.label,
-      Math.round(item.sentiment.confidence * 100) + '%',
-      item.emotion.label,
-      item.tone.label,
-      item.intent.label,
-      `"${item.interpretation.replace(/"/g, '""')}"`,
-    ])
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'sentiment_analysis_results.csv'
-    a.click()
-    URL.revokeObjectURL(url)
-    toast.success('Results exported!')
-  }
 
   const filteredItems = (result?.items || []).filter((item: BulkAnalysisItem) => {
     const matchesSearch = !searchQuery || item.original_text.toLowerCase().includes(searchQuery.toLowerCase())
@@ -238,25 +214,15 @@ export default function BulkAnalysis() {
             {loading ? 'Analyzing...' : 'Analyze All'}
           </Button>
           {result && (
-            <>
-              <Button
-                variant="outline"
-                size="lg"
-                onClick={exportCSV}
-                icon={<Download size={16} />}
-              >
-                Export CSV
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                onClick={handleExportPDF}
-                loading={exportingPDF}
-                icon={<Download size={16} />}
-              >
-                {exportingPDF ? 'Exporting…' : 'Export PDF'}
-              </Button>
-            </>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={handleExportPDF}
+              loading={exportingPDF}
+              icon={<Download size={16} />}
+            >
+              {exportingPDF ? 'Exporting…' : 'Export PDF'}
+            </Button>
           )}
         </div>
       </Card>

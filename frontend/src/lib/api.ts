@@ -6,8 +6,10 @@ const _downloadPdf = (blob: Blob, filename: string) => {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  document.body.appendChild(a)
   a.click()
-  window.URL.revokeObjectURL(url)
+  document.body.removeChild(a)
+  setTimeout(() => window.URL.revokeObjectURL(url), 100)
 }
 
 const api = axios.create({
@@ -18,8 +20,16 @@ const api = axios.create({
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    const message = error.response?.data?.detail || error.message || 'An error occurred'
+  async (error) => {
+    let message = error.message || 'An error occurred'
+    if (error.response?.data instanceof Blob && error.response.data.type === 'application/json') {
+      try {
+        const text = await error.response.data.text()
+        message = JSON.parse(text)?.detail || message
+      } catch { /* ignore parse errors */ }
+    } else if (error.response?.data?.detail) {
+      message = error.response.data.detail
+    }
     return Promise.reject(new Error(message))
   }
 )

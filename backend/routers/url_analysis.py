@@ -20,7 +20,7 @@ router = APIRouter(tags=["url_analysis"])
 def analyze_url(request: URLAnalysisRequest, db: Session = Depends(get_db)):
     start = time.time()
 
-    # Step 1: fetch comments from YouTube / Reddit
+    # Step 1: fetch comments from YouTube / Instagram
     try:
         fetched = fetch_comments(request.url, request.max_comments)
     except ValueError as e:

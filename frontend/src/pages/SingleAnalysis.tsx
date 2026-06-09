@@ -38,8 +38,8 @@ export default function SingleAnalysis() {
     setExporting(true)
     try {
       await exportSingleAnalysisPDF(result)
-    } catch {
-      toast.error('Failed to export PDF')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export PDF')
     } finally {
       setExporting(false)
     }

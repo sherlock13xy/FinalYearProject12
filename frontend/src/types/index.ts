@@ -105,7 +105,7 @@ export interface AnalyticsData {
 }
 
 export interface PostMetadata {
-  platform: 'youtube' | 'reddit';
+  platform: 'youtube' | 'instagram';
   title: string;
   author: string;
   url: string;

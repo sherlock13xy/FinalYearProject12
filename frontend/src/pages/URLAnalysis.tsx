@@ -4,6 +4,7 @@ import {
   Link2, Youtube, Instagram, Search, ChevronDown, ChevronUp,
   AlertCircle, TrendingUp, Users, BarChart2, Zap, ExternalLink, Download,
 } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useAppStore } from '@/store'
 import { analyzeURL, exportURLAnalysisPDF } from '@/lib/api'
 import { BulkAnalysisItem, URLAnalysisResponse } from '@/types'
@@ -171,6 +172,8 @@ function ResultsPanel({ result }: { result: URLAnalysisResponse }) {
     setExporting(true)
     try {
       await exportURLAnalysisPDF(result)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export PDF')
     } finally {
       setExporting(false)
     }

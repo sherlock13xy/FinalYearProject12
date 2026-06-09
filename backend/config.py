@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Instagram credentials for comment fetching (public posts only)
     INSTAGRAM_USERNAME: str = ""
     INSTAGRAM_PASSWORD: str = ""
+    INSTAGRAM_SESSION_ID: str = ""
 
     class Config:
         env_file = ".env"
