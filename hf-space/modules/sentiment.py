@@ -1,0 +1,265 @@
+import numpy as np
+import torch
+import logging
+from transformers import AutoTokenizer, AutoModel, pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import LabelEncoder
+import threading
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Seed training data for the Logistic Regression head
+# ---------------------------------------------------------------------------
+SEED_DATA = [
+    # Positive — formal
+    ("excellent product amazing quality love it highly recommended", "positive"),
+    ("great service fast delivery very satisfied customer", "positive"),
+    ("wonderful experience exceeded my expectations perfect", "positive"),
+    ("fantastic product brilliant quality best purchase ever made", "positive"),
+    ("outstanding service very helpful and professional team", "positive"),
+    ("superb quality worth every penny highly recommend this", "positive"),
+    ("amazing product works perfectly exactly what I needed", "positive"),
+    ("great value for money very happy with my purchase", "positive"),
+    ("five stars excellent quality prompt delivery love it", "positive"),
+    ("perfect product beautiful design works flawlessly recommended", "positive"),
+    # Positive — informal / comment-style
+    ("lol this is so funny cracked me up haha love it", "positive"),
+    ("this video made my day absolute gold content bro", "positive"),
+    ("omg this is hilarious dying of laughter amazing", "positive"),
+    ("love this so much keep up the great work please", "positive"),
+    ("this cracks me up every time so good so wholesome", "positive"),
+    ("bro this is pure talent respect the effort well done", "positive"),
+    ("literally cannot stop laughing this is the best video", "positive"),
+    # Negative — formal
+    ("terrible product complete waste of money very disappointed", "negative"),
+    ("horrible experience worst purchase ever never buying again", "negative"),
+    ("broken on arrival poor quality useless product", "negative"),
+    ("awful service very rude staff never going back there", "negative"),
+    ("defective product customer service completely unhelpful", "negative"),
+    ("very poor quality broke after one day money wasted", "negative"),
+    ("disgusting experience product not as described misleading", "negative"),
+    ("worst company ever no response to complaints total scam", "negative"),
+    ("cheap poor quality stopped working after week useless", "negative"),
+    ("terrible customer support product failed immediately disappointed", "negative"),
+    # Negative — informal / comment-style
+    ("this is trash dont waste your time seriously boring 👎", "negative"),
+    ("clickbait title nothing useful here total disappointment", "negative"),
+    ("worst advice ever do not follow this completely wrong", "negative"),
+    ("disliked and unsubscribed this content is terrible", "negative"),
+    # Neutral — formal
+    ("product is okay average quality nothing special", "neutral"),
+    ("it works as expected standard product decent quality", "neutral"),
+    ("product arrived on time as described average experience", "neutral"),
+    ("normal product does what it says not impressed not disappointed", "neutral"),
+    ("okay product some pros and cons pretty average overall", "neutral"),
+    ("product is fine quality is acceptable not exceptional", "neutral"),
+    ("standard delivery on time product matches description", "neutral"),
+    ("average product not great not terrible just okay", "neutral"),
+    ("meets expectations neither impressed nor disappointed", "neutral"),
+    ("decent product reasonable price average quality overall", "neutral"),
+    # Neutral — informal / comment-style (timestamps, reactions, wordplay, observations)
+    ("timestamp 5 30 for the main part of the video", "neutral"),
+    ("haha okay I see what you did there interesting", "neutral"),
+    ("first time watching this channel looks decent so far", "neutral"),
+    ("that was unexpected at 3 minutes did not see that coming", "neutral"),
+    ("this guy is playing with ideas like always just observing", "neutral"),
+    ("nice wordplay there clever pun nothing more nothing less", "neutral"),
+    ("watching this while eating lunch pretty chill content", "neutral"),
+]
+
+# ---------------------------------------------------------------------------
+# Emoji sentiment signals
+# ---------------------------------------------------------------------------
+
+# Strong positive / humorous emojis
+_POSITIVE_EMOJIS = {
+    '😂', '🤣', '😄', '😃', '😁', '😊', '😍', '🥰', '😎', '😆', '🤩', '😏',
+    # All heart variants — fans use any colour as a love/support signal
+    '❤', '♥', '💕', '💗', '💓', '💖', '💝', '🧡', '💛', '💚', '💙', '💜',
+    '🤍', '🖤', '🤎', '💞', '💘', '💟', '❣',
+    '👍', '🔥', '💯', '👏', '🎉', '🥳', '✨', '💪', '🙏', '💫', '⭐', '🌟',
+    '🫶', '🤝', '👌', '🎊', '😹', '🥹', '🫀',
+}
+
+# Strong negative emojis
+_NEGATIVE_EMOJIS = {
+    '😡', '😢', '😭', '💔', '👎', '🤮', '😤', '🤬', '😠', '😞',
+    '😔', '😟', '😕', '☹', '🙁', '😩', '😫', '🥺', '😖', '😣',
+}
+
+
+class BERTLogisticSentimentAnalyzer:
+    """Singleton BERT + Logistic Regression ensemble sentiment analyzer."""
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
+    def initialize(self, device: str = "cpu"):
+        if self._initialized:
+            return
+
+        self.device = device
+        logger.info(f"Initializing BERT+LR sentiment analyzer on device: {device}")
+
+        # DistilBERT multilingual for embeddings
+        model_name = "distilbert-base-multilingual-cased"
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.bert_model = AutoModel.from_pretrained(model_name)
+        self.bert_model.eval()
+        if device == "cuda":
+            self.bert_model = self.bert_model.cuda()
+
+        # Twitter-RoBERTa: trained on 124M tweets, 3-class (pos/neu/neg),
+        # understands emojis, slang, and informal mixed-language text natively.
+        self.sentiment_pipeline = pipeline(
+            "sentiment-analysis",
+            model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+            top_k=None,
+            device=0 if device == "cuda" else -1,
+        )
+
+        # Logistic Regression head
+        self.lr = LogisticRegression(max_iter=1000, C=1.0, random_state=42)
+        self.label_encoder = LabelEncoder()
+        self._train_lr()
+
+        self._initialized = True
+        logger.info("Sentiment analyzer initialized")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_embedding(self, text: str) -> np.ndarray:
+        inputs = self.tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=128,
+            padding=True,
+        )
+        if self.device == "cuda":
+            inputs = {k: v.cuda() for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self.bert_model(**inputs)
+
+        # Mean-pool over token dimension
+        attention_mask = inputs["attention_mask"]
+        token_embeddings = outputs.last_hidden_state
+        input_mask_expanded = (
+            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        )
+        embedding = torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+            input_mask_expanded.sum(1), min=1e-9
+        )
+        return embedding.cpu().numpy()
+
+    def _train_lr(self):
+        logger.info("Training Logistic Regression classifier on seed data...")
+        texts = [item[0] for item in SEED_DATA]
+        labels = [item[1] for item in SEED_DATA]
+
+        embeddings = [self._get_embedding(t) for t in texts]
+        X = np.vstack(embeddings)
+        y = self.label_encoder.fit_transform(labels)
+        self.lr.fit(X, y)
+        logger.info("LR classifier trained")
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _emoji_signal(text: str) -> dict:
+        """Return raw probability adjustments based on emoji presence in text."""
+        pos = sum(1 for ch in text if ch in _POSITIVE_EMOJIS)
+        neg = sum(1 for ch in text if ch in _NEGATIVE_EMOJIS)
+        if pos == 0 and neg == 0:
+            return {}
+        if pos > neg:
+            strength = min(pos * 0.09, 0.28)
+            return {"positive": strength, "neutral": strength * 0.4, "negative": -strength}
+        if neg > pos:
+            strength = min(neg * 0.09, 0.28)
+            return {"negative": strength, "positive": -strength, "neutral": 0.0}
+        return {"neutral": 0.06}  # mixed emojis — slight neutral push
+
+    def analyze(self, text: str) -> dict:
+        # ── 1. Multilingual BERT embedding → LR probabilities ──────────────
+        embedding = self._get_embedding(text[:512])
+        lr_probs = self.lr.predict_proba(embedding)[0]
+        lr_classes = self.label_encoder.classes_
+        lr_dict = {cls: float(prob) for cls, prob in zip(lr_classes, lr_probs)}
+
+        # ── 2. Twitter-RoBERTa 3-class pipeline ────────────────────────────
+        # Returns all three scores (positive / neutral / negative) natively,
+        # judging the whole sentence including emojis and tone.
+        try:
+            raw = self.sentiment_pipeline(text[:512])[0]   # list of {label, score}
+            pipe_dict: dict[str, float] = {}
+            for item in raw:
+                # model labels are "Positive", "Neutral", "Negative"
+                pipe_dict[item["label"].lower()] = float(item["score"])
+            # safety: ensure all three keys exist
+            for lbl in ("positive", "negative", "neutral"):
+                pipe_dict.setdefault(lbl, 0.0)
+        except Exception:
+            pipe_dict = lr_dict
+
+        # ── 3. Ensemble: 35 % multilingual LR + 65 % twitter-roberta ───────
+        # Twitter-RoBERTa is dominant because it was trained on informal text
+        # and already produces proper 3-class scores; LR adds multilingual
+        # coverage for non-English text the roberta model may struggle with.
+        all_labels = {"positive", "negative", "neutral"}
+        final_probs = {
+            label: 0.35 * lr_dict.get(label, 0.0) + 0.65 * pipe_dict.get(label, 0.0)
+            for label in all_labels
+        }
+
+        # ── 4. Emoji signal ─────────────────────────────────────────────────
+        emoji_adj = self._emoji_signal(text)
+        if emoji_adj:
+            for label, adj in emoji_adj.items():
+                final_probs[label] = max(0.0, final_probs.get(label, 0.0) + adj)
+
+        # ── 5. Normalise ────────────────────────────────────────────────────
+        total = sum(final_probs.values()) or 1.0
+        final_probs = {k: round(v / total, 4) for k, v in final_probs.items()}
+
+        predicted_label = max(final_probs, key=final_probs.get)
+        confidence = final_probs[predicted_label]
+
+        # ── 6. Confidence floor: below 55 % → neutral ───────────────────────
+        # When the model is uncertain, forcing positive/negative does more
+        # harm than defaulting to neutral.
+        if confidence < 0.55:
+            predicted_label = "neutral"
+            confidence = final_probs["neutral"]
+
+        # ── 7. Margin guard on negative ─────────────────────────────────────
+        # If negative and neutral are within 10 pp of each other the text
+        # is too ambiguous to confidently call negative.
+        elif predicted_label == "negative":
+            if final_probs["negative"] - final_probs["neutral"] < 0.10:
+                predicted_label = "neutral"
+                confidence = final_probs["neutral"]
+
+        return {
+            "label": predicted_label,
+            "confidence": round(confidence, 4),
+            "probabilities": final_probs,
+        }
+
+
+def get_sentiment_analyzer() -> BERTLogisticSentimentAnalyzer:
+    return BERTLogisticSentimentAnalyzer()
