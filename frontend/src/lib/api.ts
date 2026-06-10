@@ -100,6 +100,8 @@ export const exportBulkAnalysisPDF = async (result: BulkAnalysisResponse): Promi
 }
 
 export const checkHealth = async () => {
-  const { data } = await axios.get('http://localhost:8000/health')
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+  const baseUrl = apiUrl.replace(/\/api\/v1\/?$/, '')
+  const { data } = await axios.get(`${baseUrl}/health`)
   return data
 }

@@ -25,7 +25,7 @@ interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  apiUrl: 'http://localhost:8000/api/v1',
+  apiUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1',
   device: 'auto',
   maxTextLength: 5000,
   enableAnimations: true,
