@@ -1,3 +1,29 @@
+export interface User {
+  id: string;
+  username: string;
+  email: string | null;
+  role: 'admin' | 'user';
+  created_at: string;
+}
+
+export interface UserReport {
+  id: string;
+  text: string;
+  model_label: string | null;
+  user_note: string | null;
+  status: 'pending' | 'reviewed' | 'fixed';
+  reporter_username: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface ReportStats {
+  total: number;
+  pending: number;
+  reviewed: number;
+  fixed: number;
+}
+
 export interface SentimentResult {
   label: 'positive' | 'negative' | 'neutral';
   confidence: number;
@@ -119,6 +145,24 @@ export interface URLAnalysisResponse {
   items: BulkAnalysisItem[];
   aggregate: BulkAnalysisResponse['aggregate'];
   processing_time: number;
+}
+
+export interface CorrectionEntry {
+  id: string;
+  text: string;
+  correct_label: 'positive' | 'negative' | 'neutral';
+  model_label: string | null;
+  keywords: string[];
+  created_at: string;
+}
+
+export interface CorrectionStats {
+  total: number;
+  retrain_threshold: number;
+  needs_retrain: boolean;
+  label_breakdown: Record<string, number>;
+  top_keywords: Array<{ word: string; count: number }>;
+  last_retrain: string | null;
 }
 
 export interface HistoryRecord {

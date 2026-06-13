@@ -1,11 +1,13 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, MessageSquare, FileText, Clock,
-  Settings, ChevronRight, Brain, Sparkles, Link2
+  Settings, ChevronRight, Brain, Sparkles, Link2, BookOpen, LogOut, User as UserIcon, Flag,
 } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
+import { getReportStats } from '@/lib/api'
 
 const NAV_ITEMS = [
   { path: '/dashboard',    label: 'Dashboard',       icon: LayoutDashboard },
@@ -17,7 +19,23 @@ const NAV_ITEMS = [
 ]
 
 export default function Sidebar() {
-  const { sidebarCollapsed, toggleSidebar } = useAppStore()
+  const { sidebarCollapsed, toggleSidebar, user, logoutUser, pendingReportCount, setPendingReportCount } = useAppStore()
+  const navigate = useNavigate()
+  const isAdmin = user?.role === 'admin'
+
+  useEffect(() => {
+    if (!isAdmin) return
+    getReportStats().then(s => setPendingReportCount(s.pending)).catch(() => {})
+    const id = setInterval(() => {
+      getReportStats().then(s => setPendingReportCount(s.pending)).catch(() => {})
+    }, 15000)
+    return () => clearInterval(id)
+  }, [isAdmin])
+
+  const handleLogout = () => {
+    logoutUser()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <motion.aside
@@ -37,8 +55,7 @@ export default function Sidebar() {
 
         {/* Logo */}
         <div className="flex items-center gap-3 p-4 h-16 flex-shrink-0"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
-        >
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
           <motion.div
             className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 relative"
             style={{
@@ -53,21 +70,15 @@ export default function Sidebar() {
           <AnimatePresence>
             {!sidebarCollapsed && (
               <motion.div
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -10 }}
+                initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}
                 transition={{ duration: 0.2 }}
                 className="flex flex-col leading-tight overflow-hidden"
               >
                 <span className="font-bold text-sm text-white whitespace-nowrap tracking-wide">SentimentIQ</span>
                 <span className="text-[10px] whitespace-nowrap" style={{
                   background: 'linear-gradient(90deg, var(--primary), var(--secondary))',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                }}>
-                  AI Analytics Platform
-                </span>
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+                }}>AI Analytics Platform</span>
               </motion.div>
             )}
           </AnimatePresence>
@@ -76,56 +87,31 @@ export default function Sidebar() {
         {/* Navigation */}
         <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-hidden">
           {NAV_ITEMS.map(({ path, label, icon: Icon }) => (
-            <NavLink
-              key={path}
-              to={path}
+            <NavLink key={path} to={path}
               className={({ isActive }) => cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative overflow-hidden',
-                isActive
-                  ? 'text-white'
-                  : 'text-slate-400 hover:text-slate-200'
+                isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200'
               )}
               style={({ isActive }) => isActive ? {
                 background: 'linear-gradient(135deg, rgba(var(--primary-rgb),0.2) 0%, rgba(var(--secondary-rgb),0.15) 100%)',
                 border: '1px solid rgba(var(--primary-rgb),0.3)',
                 boxShadow: '0 0 16px rgba(var(--primary-rgb),0.1), inset 0 1px 0 rgba(255,255,255,0.08)',
-              } : {
-                border: '1px solid transparent',
-              }}
+              } : { border: '1px solid transparent' }}
             >
               {({ isActive }) => (
                 <>
-                  {/* Active left accent bar */}
                   {isActive && (
-                    <div
-                      className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full"
-                      style={{ background: 'linear-gradient(180deg, var(--primary), var(--secondary))' }}
-                    />
+                    <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full"
+                      style={{ background: 'linear-gradient(180deg, var(--primary), var(--secondary))' }} />
                   )}
-
-                  {/* Hover bg */}
-                  <div className={cn(
-                    'absolute inset-0 rounded-xl transition-opacity duration-200',
-                    isActive ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'
-                  )}
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
-                  />
-
-                  <Icon
-                    size={17}
-                    className="flex-shrink-0 relative z-10 transition-colors duration-200"
-                    style={isActive ? { color: 'var(--primary)' } : {}}
-                  />
-
+                  <div className={cn('absolute inset-0 rounded-xl transition-opacity duration-200', isActive ? 'opacity-0' : 'opacity-0 group-hover:opacity-100')}
+                    style={{ background: 'rgba(255,255,255,0.04)' }} />
+                  <Icon size={17} className="flex-shrink-0 relative z-10 transition-colors duration-200"
+                    style={isActive ? { color: 'var(--primary)' } : {}} />
                   <AnimatePresence>
                     {!sidebarCollapsed && (
-                      <motion.span
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.15 }}
-                        className="text-sm font-medium whitespace-nowrap overflow-hidden relative z-10"
-                      >
+                      <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
+                        className="text-sm font-medium whitespace-nowrap overflow-hidden relative z-10">
                         {label}
                       </motion.span>
                     )}
@@ -134,26 +120,125 @@ export default function Sidebar() {
               )}
             </NavLink>
           ))}
+
+          {/* Divider */}
+          <div className="mx-1 my-1.5" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }} />
+
+          {/* Training Data — admin only */}
+          {isAdmin && (
+            <NavLink to="/training-data"
+              className={({ isActive }) => cn(
+                'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative overflow-hidden',
+                isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+              )}
+              style={({ isActive }) => isActive ? {
+                background: 'linear-gradient(135deg, rgba(var(--primary-rgb),0.2) 0%, rgba(var(--secondary-rgb),0.15) 100%)',
+                border: '1px solid rgba(var(--primary-rgb),0.3)',
+              } : { border: '1px solid transparent' }}
+            >
+              {({ isActive }) => (<>
+                {isActive && <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full" style={{ background: 'linear-gradient(180deg, var(--primary), var(--secondary))' }} />}
+                <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'rgba(255,255,255,0.04)' }} />
+                <BookOpen size={17} className="flex-shrink-0 relative z-10" style={isActive ? { color: 'var(--primary)' } : { color: '#818cf8' }} />
+                <AnimatePresence>
+                  {!sidebarCollapsed && (
+                    <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
+                      className="text-sm font-medium whitespace-nowrap overflow-hidden relative z-10">
+                      Training Data
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </>)}
+            </NavLink>
+          )}
+
+          {/* User Reports — admin only */}
+          {isAdmin && (
+            <NavLink to="/user-reports"
+              className={({ isActive }) => cn(
+                'flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative overflow-hidden',
+                isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+              )}
+              style={({ isActive }) => isActive ? {
+                background: 'linear-gradient(135deg, rgba(var(--primary-rgb),0.2) 0%, rgba(var(--secondary-rgb),0.15) 100%)',
+                border: '1px solid rgba(var(--primary-rgb),0.3)',
+              } : { border: '1px solid transparent' }}
+            >
+              {({ isActive }) => (<>
+                {isActive && <div className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full" style={{ background: 'linear-gradient(180deg, var(--primary), var(--secondary))' }} />}
+                <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'rgba(255,255,255,0.04)' }} />
+                <Flag size={17} className="flex-shrink-0 relative z-10" style={isActive ? { color: 'var(--primary)' } : { color: '#f87171' }} />
+                <AnimatePresence>
+                  {!sidebarCollapsed && (
+                    <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
+                      className="flex items-center gap-2 text-sm font-medium whitespace-nowrap overflow-hidden relative z-10">
+                      User Reports
+                      {pendingReportCount > 0 && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none"
+                          style={{ background: 'rgba(239,68,68,0.25)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.4)' }}>
+                          {pendingReportCount}
+                        </span>
+                      )}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
+              </>)}
+            </NavLink>
+          )}
         </nav>
+
+        {/* User info + logout */}
+        <div className="px-2 pb-2 flex-shrink-0 space-y-1" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <AnimatePresence>
+            {!sidebarCollapsed && user && (
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="flex items-center gap-2.5 px-3 py-2.5 mt-2"
+              >
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{
+                    background: isAdmin ? 'linear-gradient(135deg,rgba(99,102,241,0.3),rgba(139,92,246,0.3))' : 'rgba(255,255,255,0.08)',
+                    border: isAdmin ? '1px solid rgba(99,102,241,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                  }}>
+                  <UserIcon size={13} style={{ color: isAdmin ? '#a5b4fc' : '#94a3b8' }} />
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <p className="text-xs font-semibold text-white truncate">{user.username}</p>
+                  <p className="text-[10px] capitalize" style={{ color: isAdmin ? '#a5b4fc' : '#64748b' }}>{user.role}</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative overflow-hidden text-slate-500 hover:text-red-400"
+            style={{ border: '1px solid transparent' }}
+            title="Logout"
+          >
+            <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              style={{ background: 'rgba(239,68,68,0.06)' }} />
+            <LogOut size={17} className="flex-shrink-0 relative z-10" />
+            <AnimatePresence>
+              {!sidebarCollapsed && (
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
+                  className="text-sm font-medium whitespace-nowrap overflow-hidden relative z-10">
+                  Logout
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </button>
+        </div>
 
         {/* Bottom Badge */}
         <AnimatePresence>
           {!sidebarCollapsed && (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="p-3 flex-shrink-0"
-              style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
+              className="p-3 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
             >
-              <div
-                className="flex items-center gap-2 rounded-xl p-3"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%)',
-                  border: '1px solid rgba(99,102,241,0.2)',
-                }}
-              >
+              <div className="flex items-center gap-2 rounded-xl p-3"
+                style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 100%)', border: '1px solid rgba(99,102,241,0.2)' }}>
                 <Sparkles size={13} className="text-indigo-400 flex-shrink-0" />
                 <div className="overflow-hidden">
                   <p className="text-xs font-semibold text-indigo-300 whitespace-nowrap">AI Powered</p>
@@ -168,8 +253,7 @@ export default function Sidebar() {
       {/* Toggle Button */}
       <motion.button
         onClick={toggleSidebar}
-        whileHover={{ scale: 1.12 }}
-        whileTap={{ scale: 0.92 }}
+        whileHover={{ scale: 1.12 }} whileTap={{ scale: 0.92 }}
         className="absolute -right-4 top-[50px] w-8 h-8 rounded-full flex items-center justify-center z-10"
         style={{
           background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)',
@@ -178,10 +262,7 @@ export default function Sidebar() {
         }}
         title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       >
-        <motion.div
-          animate={{ rotate: sidebarCollapsed ? 0 : 180 }}
-          transition={{ duration: 0.3, ease: 'easeInOut' }}
-        >
+        <motion.div animate={{ rotate: sidebarCollapsed ? 0 : 180 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>
           <ChevronRight size={14} className="text-white" />
         </motion.div>
       </motion.button>

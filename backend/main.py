@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from database.connection import init_db
-from routers import analysis, bulk, analytics, history, url_analysis, export
+from routers import analysis, bulk, analytics, history, url_analysis, export, corrections, auth, reports
 from config import settings
 import logging
 
@@ -64,6 +64,9 @@ app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(history.router, prefix="/api/v1")
 app.include_router(url_analysis.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
+app.include_router(corrections.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(reports.router, prefix="/api/v1")
 
 
 @app.get("/health")

@@ -13,8 +13,29 @@ Base = declarative_base()
 
 
 def init_db():
-    from database.models import AnalysisRecord  # noqa: F401 — ensures model is registered
+    from database.models import AnalysisRecord, CorrectionEntry, User, UserReport  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _seed_admin()
+
+
+def _seed_admin():
+    from database.models import User
+    from passlib.context import CryptContext
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.username == "admin").first()
+        if not existing:
+            pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+            admin = User(
+                username="admin",
+                email="admin@sentimentiq.com",
+                password_hash=pwd_ctx.hash("admin123"),
+                role="admin",
+            )
+            db.add(admin)
+            db.commit()
+    finally:
+        db.close()
 
 
 def get_db():

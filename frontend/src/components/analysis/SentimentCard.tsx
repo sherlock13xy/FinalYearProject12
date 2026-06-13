@@ -1,18 +1,21 @@
 import { motion } from 'framer-motion'
-import { TrendingUp, TrendingDown, Minus, Smile } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Smile, PenLine } from 'lucide-react'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Progress } from '@/components/ui/Progress'
 import { Badge } from '@/components/ui/Badge'
 import { SentimentResult, SarcasmResult } from '@/types'
 import { formatConfidence } from '@/lib/utils'
+import { useAppStore } from '@/store'
 
 interface SentimentCardProps {
   sentiment: SentimentResult
   sarcasm?: SarcasmResult
+  originalText?: string
 }
 
-export function SentimentCard({ sentiment, sarcasm }: SentimentCardProps) {
+export function SentimentCard({ sentiment, sarcasm, originalText }: SentimentCardProps) {
   const { label, confidence, probabilities } = sentiment
+  const openCorrectionPanel = useAppStore(s => s.openCorrectionPanel)
 
   const Icon = label === 'positive' ? TrendingUp : label === 'negative' ? TrendingDown : Minus
   const variant = label as 'positive' | 'negative' | 'neutral'
@@ -30,6 +33,21 @@ export function SentimentCard({ sentiment, sarcasm }: SentimentCardProps) {
           <div className="flex items-center justify-between">
             <CardTitle>Sentiment</CardTitle>
             <div className="flex items-center gap-2">
+              {originalText && (
+                <motion.button
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => openCorrectionPanel({ text: originalText, modelLabel: label })}
+                  title="Correct this prediction"
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-slate-400 hover:text-indigo-300 transition-all"
+                  style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)' }}
+                >
+                  <PenLine size={10} />
+                  Correct
+                </motion.button>
+              )}
               {sarcasm?.detected && (
                 <motion.div
                   initial={{ scale: 0 }}

@@ -16,6 +16,29 @@ from modules.response_generator import generate_response
 
 logger = logging.getLogger(__name__)
 
+
+def _lookup_correction(analyzer, original_text: str, translated_text: str):
+    """Return the user-corrected label for this text, or None if not corrected.
+
+    Checks in order:
+    1. Exact match on original text (handles English re-analysis).
+    2. Exact match on translated text (handles non-English re-analysis).
+    3. Case-insensitive match on original text (handles minor casing differences).
+    """
+    cache = getattr(analyzer, "_correction_cache", {})
+    if not cache:
+        return None
+    if original_text in cache:
+        return cache[original_text]
+    if translated_text and translated_text in cache:
+        return cache[translated_text]
+    orig_lower = original_text.strip().lower()
+    for key, label in cache.items():
+        if key.strip().lower() == orig_lower:
+            return label
+    return None
+
+
 # Emotions that are semantically compatible with each sentiment polarity.
 # The emotion model runs independently, so we post-process its top pick to
 # ensure it doesn't contradict the sentiment (e.g. Joy on a Negative result).
@@ -73,7 +96,16 @@ def analyze_text(text: str, mode: str = "single") -> dict:
 
     # Step 3: Sentiment (BERT + LR ensemble)
     sentiment_analyzer = get_sentiment_analyzer()
-    sentiment = sentiment_analyzer.analyze(analysis_text)
+
+    # Check correction cache at pipeline level using original text so
+    # non-English inputs match even after translation changes the text.
+    corrected_label = _lookup_correction(sentiment_analyzer, text, translated_text)
+    if corrected_label:
+        probs = {lbl: 0.03 for lbl in ("positive", "negative", "neutral")}
+        probs[corrected_label] = 0.94
+        sentiment = {"label": corrected_label, "confidence": 0.94, "probabilities": probs}
+    else:
+        sentiment = sentiment_analyzer.analyze(analysis_text)
 
     # Step 3b: Sarcasm — if irony is detected with high confidence and the raw
     # sentiment is positive, flip to negative (the most common sarcasm pattern:

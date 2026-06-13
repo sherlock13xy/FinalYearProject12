@@ -6,9 +6,9 @@ import {
 } from 'recharts'
 import {
   RefreshCw, TrendingUp, Heart, Volume2,
-  Target, MessageSquare, Sparkles, Activity, Wifi, WifiOff
+  Target, MessageSquare, Sparkles, Activity
 } from 'lucide-react'
-import { getAnalytics, checkHealth } from '@/lib/api'
+import { getAnalytics } from '@/lib/api'
 import { AnalyticsData } from '@/types'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -27,22 +27,16 @@ const EMOTION_COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '
 export default function Dashboard() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [connected, setConnected] = useState<boolean | null>(null)
   const { setAnalytics: storeAnalytics } = useAppStore()
 
   const fetchAnalytics = async () => {
     setLoading(true)
     try {
-      checkHealth()
-        .then(() => setConnected(true))
-        .catch(() => setConnected(false))
-
       const data = await getAnalytics()
       setAnalytics(data)
       storeAnalytics(data)
     } catch (error: unknown) {
       toast.error('Failed to load analytics. Is the backend running?')
-      setConnected(false)
     } finally {
       setLoading(false)
     }
@@ -122,34 +116,6 @@ export default function Dashboard() {
         <div>
           <h1 className="text-3xl font-bold mb-1 gradient-text">Dashboard</h1>
           <p className="text-slate-500">Real-time sentiment intelligence overview</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium ${
-              connected === true
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                : connected === false
-                  ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                  : 'bg-gray-500/10 border-gray-500/30 text-gray-400'
-            }`}
-          >
-            {connected === true ? <Wifi size={12} /> : <WifiOff size={12} />}
-            {connected === true
-              ? 'Backend Connected'
-              : connected === false
-                ? 'Backend Offline'
-                : 'Checking...'
-            }
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchAnalytics}
-            loading={loading}
-            icon={<RefreshCw size={14} />}
-          >
-            Refresh
-          </Button>
         </div>
       </motion.div>
 

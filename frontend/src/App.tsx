@@ -7,19 +7,23 @@ import BulkAnalysis from './pages/BulkAnalysis'
 import URLAnalysis from './pages/URLAnalysis'
 import History from './pages/History'
 import Settings from './pages/Settings'
+import Login from './pages/Login'
+import TrainingData from './pages/TrainingData'
+import UserReports from './pages/UserReports'
 import { useAppStore } from '@/store'
 import { getTheme, applyTheme } from '@/lib/themes'
 
 function ThemeApplier() {
   const themeId = useAppStore(s => s.themeId)
-  useEffect(() => {
-    applyTheme(getTheme(themeId))
-  }, [themeId])
-  // Apply once on mount from localStorage (before first render paints)
-  useEffect(() => {
-    applyTheme(getTheme(themeId))
-  }, [])
+  useEffect(() => { applyTheme(getTheme(themeId)) }, [themeId])
+  useEffect(() => { applyTheme(getTheme(themeId)) }, [])
   return null
+}
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const token = useAppStore(s => s.token)
+  if (!token) return <Navigate to="/login" replace />
+  return <>{children}</>
 }
 
 export default function App() {
@@ -27,7 +31,8 @@ export default function App() {
     <BrowserRouter>
       <ThemeApplier />
       <Routes>
-        <Route path="/" element={<Layout />}>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="analyze" element={<SingleAnalysis />} />
@@ -35,6 +40,8 @@ export default function App() {
           <Route path="url-analysis" element={<URLAnalysis />} />
           <Route path="history" element={<History />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="training-data" element={<TrainingData />} />
+          <Route path="user-reports" element={<UserReports />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Upload, Sparkles, Download, Search, ChevronDown, ChevronUp } from 'lucide-react'
+import { Upload, Sparkles, Download, Search, ChevronDown, ChevronUp, Flag } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { bulkAnalyze, uploadCSV, exportBulkAnalysisPDF } from '@/lib/api'
+import { ReportModal } from '@/components/ReportModal'
 import { BulkAnalysisResponse, BulkAnalysisItem } from '@/types'
 import { getSentimentBg, getEmotionColor, capitalize, truncateText, formatConfidence } from '@/lib/utils'
 import { useAppStore } from '@/store'
@@ -30,6 +31,7 @@ export default function BulkAnalysis() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
   const [sentimentFilter, setSentimentFilter] = useState<string>('all')
   const [exportingPDF, setExportingPDF] = useState(false)
+  const [reportItem, setReportItem] = useState<{ text: string; label: string } | null>(null)
   const { setIsBulkAnalyzing } = useAppStore()
 
   const handleExportPDF = async () => {
@@ -276,50 +278,51 @@ export default function BulkAnalysis() {
             ))}
           </div>
 
-          {/* Sentiment Distribution */}
-          <Card className="mb-6">
-            <CardHeader><CardTitle>Sentiment Distribution</CardTitle></CardHeader>
-            <div className="space-y-3">
-              {Object.entries(result.aggregate.sentiment_distribution).map(([sentiment, count]) => (
-                <Progress
-                  key={sentiment}
-                  label={`${capitalize(sentiment)} (${count})`}
-                  value={(count / result.total) * 100}
-                  color={
-                    sentiment === 'positive' ? '#10b981'
-                    : sentiment === 'negative' ? '#ef4444'
-                    : '#6b7280'
-                  }
-                  showValue
-                />
-              ))}
-            </div>
-          </Card>
-
-          {/* Emotion Distribution */}
-          <Card className="mb-6">
-            <CardHeader><CardTitle>Emotion Distribution</CardTitle></CardHeader>
-            <div className="space-y-3">
-              {Object.entries(result.aggregate.emotion_distribution)
-                .sort(([, a], [, b]) => b - a)
-                .map(([emotion, count]) => (
+          {/* Sentiment + Emotion Distribution side by side */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <Card>
+              <CardHeader><CardTitle>Sentiment Distribution</CardTitle></CardHeader>
+              <div className="space-y-3">
+                {Object.entries(result.aggregate.sentiment_distribution).map(([sentiment, count]) => (
                   <Progress
-                    key={emotion}
-                    label={`${emotion} (${count})`}
+                    key={sentiment}
+                    label={`${capitalize(sentiment)} (${count})`}
                     value={(count / result.total) * 100}
-                    color={getEmotionColor(emotion)}
+                    color={
+                      sentiment === 'positive' ? '#10b981'
+                      : sentiment === 'negative' ? '#ef4444'
+                      : '#6b7280'
+                    }
                     showValue
                   />
                 ))}
-            </div>
-          </Card>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader><CardTitle>Emotion Distribution</CardTitle></CardHeader>
+              <div className="space-y-3">
+                {Object.entries(result.aggregate.emotion_distribution)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([emotion, count]) => (
+                    <Progress
+                      key={emotion}
+                      label={`${emotion} (${count})`}
+                      value={(count / result.total) * 100}
+                      color={getEmotionColor(emotion)}
+                      showValue
+                    />
+                  ))}
+              </div>
+            </Card>
+          </div>
 
           {/* Results Table */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <CardTitle>Review-by-Review Results ({filteredItems.length})</CardTitle>
-                <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-3">
                   <Input
                     placeholder="Search reviews..."
                     value={searchQuery}
@@ -433,6 +436,17 @@ export default function BulkAnalysis() {
                                   <p className="text-sm font-medium text-cyan-400">{capitalize(item.intent.label)}</p>
                                 </div>
                               </div>
+
+                              <div className="pt-2 flex justify-end">
+                                <button
+                                  onClick={() => setReportItem({ text: item.original_text, label: item.sentiment.label })}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                                  style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', color: '#f87171' }}
+                                >
+                                  <Flag size={12} />
+                                  Report Issue
+                                </button>
+                              </div>
                             </div>
                           </td>
                         </tr>
@@ -478,6 +492,13 @@ export default function BulkAnalysis() {
           </Card>
         </motion.div>
       )}
+
+      <ReportModal
+        open={!!reportItem}
+        onClose={() => setReportItem(null)}
+        text={reportItem?.text ?? ''}
+        modelLabel={reportItem?.label}
+      />
     </div>
   )
 }

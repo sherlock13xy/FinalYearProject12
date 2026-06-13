@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
     LOG_LEVEL: str = "INFO"
+    JWT_SECRET: str = "sentimentiq-super-secret-key-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_DAYS: int = 7
 
     # URL analysis — requires YouTube Data API v3 key
     YOUTUBE_API_KEY: str = ""

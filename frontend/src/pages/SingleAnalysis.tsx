@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, RotateCcw, Clock, Hash, Type, Download } from 'lucide-react'
+import { Sparkles, RotateCcw, Clock, Hash, Type, Download, Flag } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Textarea } from '@/components/ui/Textarea'
 import { Button } from '@/components/ui/Button'
@@ -16,6 +16,7 @@ import { LanguageCard } from '@/components/analysis/LanguageCard'
 import { useAppStore } from '@/store'
 import { analyzeText, exportSingleAnalysisPDF } from '@/lib/api'
 import { SingleAnalysisResponse } from '@/types'
+import { ReportModal } from '@/components/ReportModal'
 
 const EXAMPLE_TEXTS = [
   "The product quality is absolutely amazing! Delivered within 2 days and works perfectly. Highly recommend to everyone!",
@@ -31,6 +32,7 @@ export default function SingleAnalysis() {
   const [result, setResult] = useState<SingleAnalysisResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const { setLastAnalysis } = useAppStore()
 
   const handleExport = async () => {
@@ -158,8 +160,17 @@ export default function SingleAnalysis() {
             exit={{ opacity: 0 }}
             className="space-y-6"
           >
-            {/* Export button */}
-            <div className="flex justify-end">
+            {/* Export + Report buttons */}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setReportOpen(true)}
+                icon={<Flag size={14} />}
+                className="text-red-400 border-red-500/30 hover:border-red-500/60 hover:bg-red-500/10"
+              >
+                Report Issue
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -170,6 +181,13 @@ export default function SingleAnalysis() {
                 {exporting ? 'Exporting…' : 'Export PDF'}
               </Button>
             </div>
+
+            <ReportModal
+              open={reportOpen}
+              onClose={() => setReportOpen(false)}
+              text={result.original_text}
+              modelLabel={result.sentiment.label}
+            />
 
             {/* Stats Row */}
             <div className="grid grid-cols-3 gap-4">
@@ -199,7 +217,7 @@ export default function SingleAnalysis() {
                 isTranslation={result.is_translation}
                 originalText={result.original_text}
               />
-              <SentimentCard sentiment={result.sentiment} sarcasm={result.sarcasm} />
+              <SentimentCard sentiment={result.sentiment} sarcasm={result.sarcasm} originalText={result.original_text} />
               <EmotionCard emotion={result.emotion} />
               <ToneCard tone={result.tone} />
               <IntentCard intent={result.intent} />
