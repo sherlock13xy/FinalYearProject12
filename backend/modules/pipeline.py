@@ -100,6 +100,7 @@ def analyze_text(text: str, mode: str = "single") -> dict:
     # Check correction cache at pipeline level using original text so
     # non-English inputs match even after translation changes the text.
     corrected_label = _lookup_correction(sentiment_analyzer, text, translated_text)
+    from_correction = corrected_label is not None
     if corrected_label:
         probs = {lbl: 0.03 for lbl in ("positive", "negative", "neutral")}
         probs[corrected_label] = 0.94
@@ -110,9 +111,11 @@ def analyze_text(text: str, mode: str = "single") -> dict:
     # Step 3b: Sarcasm — if irony is detected with high confidence and the raw
     # sentiment is positive, flip to negative (the most common sarcasm pattern:
     # positive words used to mean the opposite).
+    # Skip this override when the label came from an admin correction so that
+    # the human override is always respected.
     sarcasm_detector = get_sarcasm_detector()
     sarcasm = sarcasm_detector.analyze(analysis_text)
-    if sarcasm["detected"] and sentiment["label"] == "positive":
+    if not from_correction and sarcasm["detected"] and sentiment["label"] == "positive":
         old_neg = sentiment["probabilities"].get("negative", 0.0)
         old_pos = sentiment["probabilities"].get("positive", 0.0)
         sentiment = {

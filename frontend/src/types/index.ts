@@ -147,6 +147,34 @@ export interface URLAnalysisResponse {
   processing_time: number;
 }
 
+export interface AdminUserEntry {
+  id: string
+  username: string
+  email: string | null
+  role: 'admin' | 'user'
+  is_active: boolean
+  created_at: string | null
+}
+
+export interface AdminStats {
+  users: {
+    total: number
+    admins: number
+    regular_users: number
+    list: AdminUserEntry[]
+  }
+  storage: {
+    db_size_bytes: number
+    db_size_mb: number
+    limit_mb: number
+    usage_pct: number
+    analysis_records: number
+    correction_entries: number
+    user_reports: number
+    total_records: number
+  }
+}
+
 export interface CorrectionEntry {
   id: string;
   text: string;

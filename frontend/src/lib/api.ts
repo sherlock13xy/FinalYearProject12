@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { SingleAnalysisResponse, BulkAnalysisResponse, AnalyticsData, HistoryRecord, URLAnalysisResponse, CorrectionEntry, CorrectionStats, User, UserReport, ReportStats } from '@/types'
+import { SingleAnalysisResponse, BulkAnalysisResponse, AnalyticsData, HistoryRecord, URLAnalysisResponse, CorrectionEntry, CorrectionStats, User, UserReport, ReportStats, AdminStats } from '@/types'
 
 const _downloadPdf = (blob: Blob, filename: string) => {
   const url = window.URL.createObjectURL(blob)
@@ -212,4 +212,30 @@ export const reviewReport = async (
 
 export const deleteReport = async (id: string): Promise<void> => {
   await api.delete(`/reports/${id}`)
+}
+
+// Admin
+export const getAdminStats = async (): Promise<AdminStats> => {
+  const { data } = await api.get('/admin/stats')
+  return data
+}
+
+export const clearAnalysisRecords = async (): Promise<{ deleted: number }> => {
+  const { data } = await api.delete('/admin/clear-analysis')
+  return data
+}
+
+export const clearAllData = async (): Promise<{ deleted: number; analysis: number; corrections: number; reports: number }> => {
+  const { data } = await api.delete('/admin/clear-all')
+  return data
+}
+
+export const restrictUser = async (userId: string): Promise<{ id: string; username: string; is_active: boolean }> => {
+  const { data } = await api.patch(`/admin/users/${userId}/restrict`)
+  return data
+}
+
+export const deleteUser = async (userId: string): Promise<{ deleted: string }> => {
+  const { data } = await api.delete(`/admin/users/${userId}`)
+  return data
 }

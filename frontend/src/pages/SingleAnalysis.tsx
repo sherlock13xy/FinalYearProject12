@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, RotateCcw, Clock, Hash, Type, Download, Flag } from 'lucide-react'
+import { Sparkles, RotateCcw, Download, Flag } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Textarea } from '@/components/ui/Textarea'
 import { Button } from '@/components/ui/Button'
@@ -189,24 +189,6 @@ export default function SingleAnalysis() {
               modelLabel={result.sentiment.label}
             />
 
-            {/* Stats Row */}
-            <div className="grid grid-cols-3 gap-4">
-              {[
-                { icon: Clock, label: 'Processing Time', value: `${result.processing_time}s` },
-                { icon: Hash, label: 'Word Count', value: result.word_count },
-                { icon: Type, label: 'Characters', value: result.char_count },
-              ].map(({ icon: Icon, label, value }) => (
-                <Card key={label} className="py-4">
-                  <div className="flex items-center gap-3">
-                    <Icon size={18} className="text-indigo-400" />
-                    <div>
-                      <p className="text-xs text-slate-500">{label}</p>
-                      <p className="text-lg font-bold text-white">{value}</p>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
 
             {/* Main Analysis Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

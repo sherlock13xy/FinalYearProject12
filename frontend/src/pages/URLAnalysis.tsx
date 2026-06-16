@@ -237,8 +237,6 @@ function ResultsPanel({ result }: { result: URLAnalysisResponse }) {
           <span>{post.fetched_comments} comments analysed</span>
           <span>·</span>
           <span>{post.total_available.toLocaleString()} total comments</span>
-          <span>·</span>
-          <span>{result.processing_time}s</span>
         </div>
       </div>
 

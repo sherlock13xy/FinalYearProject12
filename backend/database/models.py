@@ -22,6 +22,7 @@ class User(Base):
     email = Column(String(120), unique=True, nullable=True)
     password_hash = Column(String(128), nullable=False)
     role = Column(String(10), nullable=False, default="user")  # "admin" or "user"
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

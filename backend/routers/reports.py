@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database.connection import get_db
-from database.models import UserReport, CorrectionEntry
+from database.models import UserReport, CorrectionEntry, AnalysisRecord
 from schemas.reports import ReportCreate, ReportResponse, ReportReview
 from auth.deps import get_current_user, require_admin, get_optional_user
 from database.models import User
@@ -87,6 +87,27 @@ def review_report(
             keywords=body.keywords or [],
         )
         db.add(entry)
+
+        # Update all historical AnalysisRecord rows that match this text so
+        # the History page immediately reflects the correct label.
+        matching_records = (
+            db.query(AnalysisRecord)
+            .filter(AnalysisRecord.original_text == report.text)
+            .all()
+        )
+        for record in matching_records:
+            record.sentiment_label = body.correct_label
+            record.sentiment_confidence = 0.94
+            old_probs = record.sentiment_probabilities or {}
+            old_probs = {k: 0.03 for k in ("positive", "negative", "neutral")}
+            old_probs[body.correct_label] = 0.94
+            record.sentiment_probabilities = old_probs
+        if matching_records:
+            logger.info(
+                f"Updated {len(matching_records)} AnalysisRecord(s) with corrected label '{body.correct_label}'"
+            )
+
+        # Update in-memory correction cache for immediate effect on new analyses.
         try:
             get_sentiment_analyzer().apply_single_correction(
                 report.text, body.correct_label, body.keywords or []

@@ -434,10 +434,7 @@ export default function History() {
                                 </div>
 
                                 <div className="flex items-center gap-3 pt-1">
-                                  <Badge variant="primary">
-                                    {record.processing_time}s processing
-                                  </Badge>
-                                  <Badge variant="default">
+<Badge variant="default">
                                     {record.mode} mode
                                   </Badge>
                                 </div>

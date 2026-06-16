@@ -40,6 +40,11 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
+    if not getattr(user, 'is_active', True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been restricted. Contact an administrator.",
+        )
     token = create_access_token(user.id, user.username, user.role)
     return TokenResponse(access_token=token, user=UserOut.model_validate(user))
 

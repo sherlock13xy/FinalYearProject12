@@ -39,8 +39,8 @@ export function BackendStatus() {
     <div className="flex items-center gap-2">
       <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium ${pillStyle}`}>
         {status === 'offline'
-          ? <WifiOff size={12} />
-          : <Wifi size={12} className={status === 'checking' ? 'animate-pulse' : ''} />
+          ? <WifiOff size={12} className="translate-y-px" />
+          : <Wifi size={12} className={`translate-y-px${status === 'checking' ? ' animate-pulse' : ''}`} />
         }
         {label}
       </div>
@@ -49,7 +49,7 @@ export function BackendStatus() {
         size="sm"
         onClick={check}
         loading={loading}
-        icon={<RefreshCw size={13} />}
+        icon={<RefreshCw size={13} className="translate-y-px" />}
       >
         Refresh
       </Button>

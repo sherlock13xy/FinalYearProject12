@@ -203,6 +203,20 @@ class BERTLogisticSentimentAnalyzer:
         return {"neutral": 0.06}  # mixed emojis — slight neutral push
 
     def analyze(self, text: str) -> dict:
+        # ── 0. Exact-match correction override ──────────────────────────────
+        # If an admin has corrected this exact text, return that label directly
+        # without running inference so the fix is always honoured.
+        if self._correction_cache:
+            cached_label = self._correction_cache.get(text) or self._correction_cache.get(text.strip())
+            if cached_label:
+                probs = {"positive": 0.0, "negative": 0.0, "neutral": 0.0}
+                probs[cached_label] = 1.0
+                return {
+                    "label": cached_label,
+                    "confidence": 1.0,
+                    "probabilities": probs,
+                }
+
         # ── 1. Multilingual BERT embedding → LR probabilities ──────────────
         embedding = self._get_embedding(text[:512])
         lr_probs = self.lr.predict_proba(embedding)[0]

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from database.connection import init_db
-from routers import analysis, bulk, analytics, history, url_analysis, export, corrections, auth, reports
+from routers import analysis, bulk, analytics, history, url_analysis, export, corrections, auth, reports, admin
 from config import settings
 import logging
 
@@ -38,6 +38,28 @@ async def lifespan(app: FastAPI):
         initialize_models()
     except Exception as e:
         logger.warning(f"Model initialization deferred: {e}")
+
+    # Reload persisted corrections into the in-memory cache so that fixes
+    # survive server restarts and are applied immediately on next analysis.
+    try:
+        from database.connection import SessionLocal
+        from database.models import CorrectionEntry
+        from modules.sentiment import get_sentiment_analyzer
+        db = SessionLocal()
+        try:
+            entries = db.query(CorrectionEntry).all()
+            if entries:
+                corrections = [
+                    {"text": e.text, "correct_label": e.correct_label, "keywords": e.keywords or []}
+                    for e in entries
+                ]
+                get_sentiment_analyzer().retrain_with_corrections(corrections)
+                logger.info(f"Reloaded {len(entries)} corrections from database into model cache")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Correction reload failed (non-fatal): {e}")
+
     yield
     logger.info("Shutting down...")
 
@@ -67,6 +89,7 @@ app.include_router(export.router, prefix="/api/v1")
 app.include_router(corrections.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(reports.router, prefix="/api/v1")
+app.include_router(admin.router,   prefix="/api/v1")
 
 
 @app.get("/health")

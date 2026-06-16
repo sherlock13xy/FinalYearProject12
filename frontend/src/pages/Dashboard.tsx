@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   RefreshCw, TrendingUp, Heart, Volume2,
-  Target, MessageSquare, Sparkles, Activity
+  Target, MessageSquare, Sparkles, Activity, Globe
 } from 'lucide-react'
 import { getAnalytics } from '@/lib/api'
 import { AnalyticsData } from '@/types'
@@ -22,7 +22,17 @@ const SENTIMENT_COLORS: Record<string, string> = {
   negative: '#ef4444',
   neutral: '#6b7280',
 }
-const EMOTION_COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#3b82f6']
+const EMOTION_COLORS  = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#3b82f6']
+const TONE_COLORS     = ['#06b6d4', '#8b5cf6', '#f59e0b', '#ef4444', '#10b981', '#ec4899', '#3b82f6', '#6366f1']
+const INTENT_COLORS   = ['#f59e0b', '#10b981', '#6366f1', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#3b82f6']
+const LANGUAGE_COLORS = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#94a3b8']
+
+const TOOLTIP_STYLE = {
+  background: '#1e1e2e',
+  border: '1px solid rgba(255,255,255,0.1)',
+  borderRadius: '8px',
+  color: '#f1f5f9',
+}
 
 export default function Dashboard() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
@@ -46,20 +56,44 @@ export default function Dashboard() {
 
   const sentimentPieData = analytics
     ? Object.entries(analytics.sentiment_distribution).map(([name, value]) => ({
-        name: capitalize(name),
-        value,
+        name: capitalize(name), value,
       }))
     : []
 
   const emotionBarData = analytics
-    ? Object.entries(analytics.emotion_distribution).map(([name, value]) => ({ name, value }))
+    ? Object.entries(analytics.emotion_distribution).map(([name, value]) => ({ name: capitalize(name), value }))
     : []
+
+  const toneBarData = analytics
+    ? Object.entries(analytics.tone_distribution)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, value]) => ({ name: capitalize(name), value }))
+    : []
+
+  const intentBarData = analytics
+    ? Object.entries(analytics.intent_distribution)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, value]) => ({ name: capitalize(name), value }))
+    : []
+
+  const languagePieData = analytics
+    ? Object.entries(analytics.language_distribution)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([name, value]) => ({ name, value }))
+    : []
+
+  const pct = (dist: Record<string, number>, key: string) => {
+    const total = Object.values(dist).reduce((s, v) => s + v, 0)
+    return total > 0 ? Math.round((dist[key] ?? 0) / total * 100) : 0
+  }
 
   const kpiCards = analytics
     ? [
         {
           label: 'Total Analyzed',
-          value: analytics.total_analyzed,
+          value: analytics.total_analyzed.toLocaleString(),
+          metric: null,
           icon: MessageSquare,
           colorClass: 'text-indigo-400',
           bgClass: 'bg-indigo-500/10',
@@ -67,6 +101,7 @@ export default function Dashboard() {
         {
           label: 'Dominant Sentiment',
           value: capitalize(analytics.dominant_sentiment),
+          metric: `${pct(analytics.sentiment_distribution, analytics.dominant_sentiment)}% of total`,
           icon: TrendingUp,
           colorClass:
             analytics.dominant_sentiment === 'positive' ? 'text-emerald-400'
@@ -76,7 +111,8 @@ export default function Dashboard() {
         },
         {
           label: 'Dominant Emotion',
-          value: analytics.dominant_emotion,
+          value: capitalize(analytics.dominant_emotion),
+          metric: `${pct(analytics.emotion_distribution, analytics.dominant_emotion.toLowerCase())}% of total`,
           icon: Heart,
           colorClass: 'text-violet-400',
           bgClass: 'bg-violet-500/10',
@@ -84,6 +120,7 @@ export default function Dashboard() {
         {
           label: 'Dominant Tone',
           value: capitalize(analytics.dominant_tone),
+          metric: `${pct(analytics.tone_distribution, analytics.dominant_tone)}% of total`,
           icon: Volume2,
           colorClass: 'text-cyan-400',
           bgClass: 'bg-cyan-500/10',
@@ -91,6 +128,7 @@ export default function Dashboard() {
         {
           label: 'Dominant Intent',
           value: capitalize(analytics.dominant_intent),
+          metric: `${pct(analytics.intent_distribution, analytics.dominant_intent)}% of total`,
           icon: Target,
           colorClass: 'text-amber-400',
           bgClass: 'bg-amber-500/10',
@@ -98,6 +136,7 @@ export default function Dashboard() {
         {
           label: 'Avg Confidence',
           value: `${Math.round(analytics.average_confidence * 100)}%`,
+          metric: 'across all analyses',
           icon: Activity,
           colorClass: 'text-emerald-400',
           bgClass: 'bg-emerald-500/10',
@@ -111,7 +150,7 @@ export default function Dashboard() {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between flex-wrap gap-4"
+        className="flex items-center justify-between flex-wrap gap-4 pt-4"
       >
         <div>
           <h1 className="text-3xl font-bold mb-1 gradient-text">Dashboard</h1>
@@ -131,7 +170,7 @@ export default function Dashboard() {
           transition={{ delay: 0.1 }}
           className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4"
         >
-          {kpiCards.map(({ label, value, icon: Icon, colorClass, bgClass }, i) => (
+          {kpiCards.map(({ label, value, metric, icon: Icon, colorClass, bgClass }, i) => (
             <motion.div
               key={label}
               initial={{ opacity: 0, y: 20 }}
@@ -144,6 +183,9 @@ export default function Dashboard() {
                 </div>
                 <p className={`text-xl font-bold ${colorClass}`}>{value}</p>
                 <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+                {metric && (
+                  <p className="text-[10px] text-slate-600 mt-1">{metric}</p>
+                )}
               </Card>
             </motion.div>
           ))}
@@ -167,55 +209,132 @@ export default function Dashboard() {
         </motion.div>
       )}
 
-      {/* Charts Row */}
+      {/* Charts Row 1: Sentiment + Emotion + Language */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Skeleton className="h-80" />
-          <Skeleton className="h-80" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-80" />)}
         </div>
       ) : analytics && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
-          className="grid grid-cols-1 md:grid-cols-2 gap-6"
+          className="grid grid-cols-1 md:grid-cols-3 gap-6"
         >
-          {/* Sentiment Pie Chart */}
+          {/* Sentiment Pie */}
           <Card>
             <CardHeader><CardTitle>Sentiment Distribution</CardTitle></CardHeader>
             {sentimentPieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
+              <ResponsiveContainer width="100%" height={230}>
                 <PieChart>
                   <Pie
                     data={sentimentPieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
+                    cx="50%" cy="50%"
+                    innerRadius={55} outerRadius={90}
+                    paddingAngle={5} dataKey="value"
                   >
                     {sentimentPieData.map((entry, index) => (
-                      <Cell
-                        key={index}
-                        fill={SENTIMENT_COLORS[entry.name.toLowerCase()] || '#6b7280'}
-                      />
+                      <Cell key={index} fill={SENTIMENT_COLORS[entry.name.toLowerCase()] || '#6b7280'} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      background: '#1e1e2e',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '8px',
-                      color: '#f1f5f9',
-                    }}
-                  />
-                  <Legend
-                    formatter={(value) => (
-                      <span style={{ color: '#94a3b8' }}>{value}</span>
-                    )}
-                  />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val: number) => [val, 'Count']} />
+                  <Legend formatter={(value) => <span style={{ color: '#94a3b8' }}>{value}</span>} />
                 </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-56 flex items-center justify-center text-slate-500 text-sm">
+                No data yet. Start analyzing text!
+              </div>
+            )}
+          </Card>
+
+          {/* Emotion Bar */}
+          <Card>
+            <CardHeader><CardTitle>Emotion Distribution</CardTitle></CardHeader>
+            {emotionBarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={230}>
+                <BarChart data={emotionBarData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    {emotionBarData.map((_, index) => (
+                      <Cell key={index} fill={EMOTION_COLORS[index % EMOTION_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-56 flex items-center justify-center text-slate-500 text-sm">
+                No data yet. Start analyzing text!
+              </div>
+            )}
+          </Card>
+
+          {/* Language Distribution */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe size={15} className="text-slate-400" />
+                Language Distribution
+              </CardTitle>
+            </CardHeader>
+            {languagePieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={230}>
+                <PieChart>
+                  <Pie
+                    data={languagePieData}
+                    cx="50%" cy="50%"
+                    innerRadius={55} outerRadius={90}
+                    paddingAngle={4} dataKey="value"
+                  >
+                    {languagePieData.map((_, index) => (
+                      <Cell key={index} fill={LANGUAGE_COLORS[index % LANGUAGE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val: number) => [val, 'Count']} />
+                  <Legend formatter={(value) => <span style={{ color: '#94a3b8', fontSize: 11 }}>{value}</span>} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-56 flex items-center justify-center text-slate-500 text-sm">
+                No data yet. Start analyzing text!
+              </div>
+            )}
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Charts Row 2: Tone + Intent horizontal bars */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Skeleton className="h-72" />
+          <Skeleton className="h-72" />
+        </div>
+      ) : analytics && (toneBarData.length > 0 || intentBarData.length > 0) && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="grid grid-cols-1 md:grid-cols-2 gap-6"
+        >
+          {/* Tone Breakdown */}
+          <Card>
+            <CardHeader><CardTitle>Tone Breakdown</CardTitle></CardHeader>
+            {toneBarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={toneBarData} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={90} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    {toneBarData.map((_, index) => (
+                      <Cell key={index} fill={TONE_COLORS[index % TONE_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
             ) : (
               <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
@@ -224,26 +343,19 @@ export default function Dashboard() {
             )}
           </Card>
 
-          {/* Emotion Bar Chart */}
+          {/* Intent Breakdown */}
           <Card>
-            <CardHeader><CardTitle>Emotion Distribution</CardTitle></CardHeader>
-            {emotionBarData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={emotionBarData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: '#1e1e2e',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '8px',
-                      color: '#f1f5f9',
-                    }}
-                  />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                    {emotionBarData.map((_, index) => (
-                      <Cell key={index} fill={EMOTION_COLORS[index % EMOTION_COLORS.length]} />
+            <CardHeader><CardTitle>Intent Breakdown</CardTitle></CardHeader>
+            {intentBarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={intentBarData} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} width={90} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    {intentBarData.map((_, index) => (
+                      <Cell key={index} fill={INTENT_COLORS[index % INTENT_COLORS.length]} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -267,22 +379,12 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
                 <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{
-                    background: '#1e1e2e',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '8px',
-                    color: '#f1f5f9',
-                  }}
-                />
-                <Legend
-                  formatter={(value) => (
-                    <span style={{ color: '#94a3b8' }}>{capitalize(value)}</span>
-                  )}
-                />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
+                <Legend formatter={(value) => <span style={{ color: '#94a3b8' }}>{capitalize(value)}</span>} />
                 <Line type="monotone" dataKey="positive" stroke="#10b981" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="negative" stroke="#ef4444" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="neutral" stroke="#6b7280" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="neutral"  stroke="#6b7280" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="total"    stroke="#6366f1" strokeWidth={2} dot={false} strokeDasharray="5 5" />
               </LineChart>
             </ResponsiveContainer>
           </Card>
@@ -297,7 +399,7 @@ export default function Dashboard() {
           transition={{ delay: 0.5 }}
           className="grid grid-cols-1 xl:grid-cols-2 gap-6"
         >
-          {/* Word Cloud / Top Keywords */}
+          {/* Word Cloud */}
           <Card>
             <CardHeader><CardTitle>Top Keywords</CardTitle></CardHeader>
             <div className="flex flex-wrap gap-2 p-2 min-h-[120px]">

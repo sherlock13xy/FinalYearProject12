@@ -1,7 +1,5 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
-import { CorrectionPanel } from './CorrectionPanel'
-import { BackendStatus } from './BackendStatus'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 
@@ -38,21 +36,12 @@ export default function Layout() {
       </div>
 
       <Sidebar />
-      <CorrectionPanel />
 
       <main className={cn(
         'flex-1 overflow-auto transition-all duration-300 relative z-10',
         sidebarCollapsed ? 'ml-16' : 'ml-64'
       )}>
-        {/* Global status bar */}
-        <div className="sticky top-0 z-30 flex justify-end px-6 py-3 pointer-events-none"
-          style={{ background: 'linear-gradient(to bottom, rgba(7,7,17,0.9) 60%, transparent)' }}>
-          <div className="pointer-events-auto">
-            <BackendStatus />
-          </div>
-        </div>
-
-        <div className="min-h-full px-6 pb-6 -mt-2">
+<div className="min-h-full px-6 pb-6">
           <Outlet />
         </div>
       </main>

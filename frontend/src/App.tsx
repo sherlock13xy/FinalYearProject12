@@ -10,6 +10,7 @@ import Settings from './pages/Settings'
 import Login from './pages/Login'
 import TrainingData from './pages/TrainingData'
 import UserReports from './pages/UserReports'
+import AdminOverview from './pages/AdminOverview'
 import { useAppStore } from '@/store'
 import { getTheme, applyTheme } from '@/lib/themes'
 
@@ -23,6 +24,12 @@ function ThemeApplier() {
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAppStore(s => s.token)
   if (!token) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const user = useAppStore(s => s.user)
+  if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
@@ -40,8 +47,9 @@ export default function App() {
           <Route path="url-analysis" element={<URLAnalysis />} />
           <Route path="history" element={<History />} />
           <Route path="settings" element={<Settings />} />
-          <Route path="training-data" element={<TrainingData />} />
-          <Route path="user-reports" element={<UserReports />} />
+          <Route path="admin" element={<RequireAdmin><AdminOverview /></RequireAdmin>} />
+          <Route path="training-data" element={<RequireAdmin><TrainingData /></RequireAdmin>} />
+          <Route path="user-reports" element={<RequireAdmin><UserReports /></RequireAdmin>} />
         </Route>
       </Routes>
     </BrowserRouter>

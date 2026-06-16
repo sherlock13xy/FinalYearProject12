@@ -15,7 +15,20 @@ Base = declarative_base()
 def init_db():
     from database.models import AnalysisRecord, CorrectionEntry, User, UserReport  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _migrate_users_table()
     _seed_admin()
+
+
+def _migrate_users_table():
+    """Add is_active column to users table if it doesn't exist (SQLite migration)."""
+    with engine.connect() as conn:
+        try:
+            conn.execute(__import__('sqlalchemy').text(
+                "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+            ))
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 def _seed_admin():
