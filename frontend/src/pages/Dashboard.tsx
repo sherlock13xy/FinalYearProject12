@@ -77,10 +77,13 @@ export default function Dashboard() {
     : []
 
   const languagePieData = analytics
-    ? Object.entries(analytics.language_distribution)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 8)
-        .map(([name, value]) => ({ name, value }))
+    ? (() => {
+        const sorted = Object.entries(analytics.language_distribution).sort((a, b) => b[1] - a[1])
+        const top = sorted.slice(0, 5).map(([name, value]) => ({ name, value }))
+        const othersVal = sorted.slice(5).reduce((s, [, v]) => s + v, 0)
+        if (othersVal > 0) top.push({ name: 'Others', value: othersVal })
+        return top
+      })()
     : []
 
   const pct = (dist: Record<string, number>, key: string) => {
@@ -281,22 +284,36 @@ export default function Dashboard() {
               </CardTitle>
             </CardHeader>
             {languagePieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={230}>
-                <PieChart>
-                  <Pie
-                    data={languagePieData}
-                    cx="50%" cy="50%"
-                    innerRadius={55} outerRadius={90}
-                    paddingAngle={4} dataKey="value"
-                  >
-                    {languagePieData.map((_, index) => (
-                      <Cell key={index} fill={LANGUAGE_COLORS[index % LANGUAGE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val: number) => [val, 'Count']} />
-                  <Legend formatter={(value) => <span style={{ color: '#94a3b8', fontSize: 11 }}>{value}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div className="flex flex-col gap-3 px-2 pb-4">
+                <ResponsiveContainer width="100%" height={190}>
+                  <PieChart>
+                    <Pie
+                      data={languagePieData}
+                      cx="50%" cy="50%"
+                      innerRadius={52} outerRadius={82}
+                      paddingAngle={4} dataKey="value"
+                    >
+                      {languagePieData.map((_, index) => (
+                        <Cell key={index} fill={LANGUAGE_COLORS[index % LANGUAGE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(val: number) => [val, 'Count']} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+                  {languagePieData.map((entry, index) => (
+                    <div key={entry.name} className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                        style={{ backgroundColor: LANGUAGE_COLORS[index % LANGUAGE_COLORS.length] }}
+                      />
+                      <span className="text-[11px] text-slate-400 truncate max-w-[90px]" title={entry.name}>
+                        {entry.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
               <div className="h-56 flex items-center justify-center text-slate-500 text-sm">
                 No data yet. Start analyzing text!

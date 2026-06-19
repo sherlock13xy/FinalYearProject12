@@ -21,11 +21,6 @@ class Settings(BaseSettings):
     # URL analysis — requires YouTube Data API v3 key
     YOUTUBE_API_KEY: str = ""
 
-    # Instagram credentials for comment fetching (public posts only)
-    INSTAGRAM_USERNAME: str = ""
-    INSTAGRAM_PASSWORD: str = ""
-    INSTAGRAM_SESSION_ID: str = ""
-
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

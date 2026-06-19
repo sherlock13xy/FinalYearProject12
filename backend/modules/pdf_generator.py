@@ -7,7 +7,6 @@ _GREEN    = (16,  185, 129)
 _RED      = (239, 68,  68)
 _AMBER    = (245, 158, 11)
 _VIOLET   = (139, 92,  246)
-_PINK     = (236, 72,  153)
 _GRAY     = (107, 114, 128)
 _LIGHT    = (243, 244, 246)
 _DARK     = (31,  41,  55)
@@ -15,7 +14,7 @@ _WHITE    = (255, 255, 255)
 _BORDER   = (209, 213, 219)
 
 SENTIMENT_COLOR = {"positive": _GREEN, "negative": _RED, "neutral": _GRAY}
-PLATFORM_COLOR  = {"youtube": _RED, "instagram": _PINK}
+PLATFORM_COLOR  = {"youtube": _RED, "myntra": _INDIGO}
 
 
 class _PDF(FPDF):

@@ -131,7 +131,7 @@ export interface AnalyticsData {
 }
 
 export interface PostMetadata {
-  platform: 'youtube' | 'instagram';
+  platform: 'youtube' | 'myntra';
   title: string;
   author: string;
   url: string;

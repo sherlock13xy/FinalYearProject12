@@ -21,6 +21,12 @@ function ThemeApplier() {
   return null
 }
 
+function ClearAuthOnStartup() {
+  const logoutUser = useAppStore(s => s.logoutUser)
+  useEffect(() => { logoutUser() }, [])
+  return null
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAppStore(s => s.token)
   if (!token) return <Navigate to="/login" replace />
@@ -37,6 +43,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <ThemeApplier />
+      <ClearAuthOnStartup />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>

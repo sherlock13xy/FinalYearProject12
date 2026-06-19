@@ -1,22 +1,19 @@
-import os
 import re
 import logging
 from urllib.parse import urlparse, parse_qs
-
-_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 logger = logging.getLogger(__name__)
 
 
 def detect_platform(url: str) -> str:
-    """Return 'youtube' or 'instagram', raise ValueError for unsupported URLs."""
+    """Return 'youtube' or 'myntra'; raise ValueError for unsupported URLs."""
     host = urlparse(url.strip()).netloc.lower().removeprefix("www.")
     if host in ("youtube.com", "youtu.be", "m.youtube.com"):
         return "youtube"
-    if host in ("instagram.com", "m.instagram.com"):
-        return "instagram"
+    if host == "myntra.com":
+        return "myntra"
     raise ValueError(
-        "Unsupported URL. Paste a YouTube video URL or an Instagram post/reel URL."
+        "Unsupported URL. Paste a YouTube video URL or a Myntra product URL."
     )
 
 
@@ -112,109 +109,117 @@ def fetch_youtube_comments(url: str, max_comments: int = 50) -> dict:
     }
 
 
-def _instagram_shortcode(url: str) -> str:
+def _myntra_product_id(url: str) -> str:
     path = urlparse(url).path
-    m = re.search(r"/(?:p|reel|tv)/([A-Za-z0-9_-]+)", path)
+    m = re.search(r'/(\d{6,10})(?:/|$)', path)
     if not m:
-        raise ValueError("Could not extract Instagram post shortcode from URL.")
+        raise ValueError(
+            "Could not extract Myntra product ID from URL. "
+            "Paste a valid Myntra product page URL (e.g. myntra.com/shoes/.../12345678/buy)."
+        )
     return m.group(1)
 
 
-def _get_instagram_client():
+def fetch_myntra_reviews(url: str, max_reviews: int = 50) -> dict:
+    """Fetch product reviews from Myntra using their internal reviews API."""
     try:
-        from instagrapi import Client
-        from instagrapi.exceptions import LoginRequired, ChallengeRequired, BadPassword
-        import instagrapi.extractors as _extractors
+        from curl_cffi import requests as cf_requests
     except ImportError:
-        raise RuntimeError("instagrapi is not installed. Run: python -m pip install instagrapi")
-
-    # Instagram added XDTGraphImage/XDTGraphVideo types that instagrapi's GQL
-    # parser doesn't recognise yet — patch the map so GQL succeeds instead of
-    # falling back to the private API with a logged traceback every request.
-    _extractors.MEDIA_TYPES_GQL.setdefault("XDTGraphImage", 1)   # 1 = Photo
-    _extractors.MEDIA_TYPES_GQL.setdefault("XDTGraphVideo", 2)   # 2 = Video
-    _extractors.MEDIA_TYPES_GQL.setdefault("XDTGraphSidecar", 8) # 8 = Carousel
-
-    from config import settings
-
-    session_id = getattr(settings, "INSTAGRAM_SESSION_ID", "").strip()
-    username = getattr(settings, "INSTAGRAM_USERNAME", "").strip()
-    password = getattr(settings, "INSTAGRAM_PASSWORD", "").strip()
-
-    cl = Client()
-    settings_file = os.path.join(_BACKEND_DIR, "instagram_client_settings.json")
-
-    # Load previously saved client settings (device fingerprint + session)
-    if os.path.exists(settings_file):
-        cl.load_settings(settings_file)
-
-    if session_id:
-        cl.login_by_sessionid(session_id)
-        logger.info("Instagram authenticated via session ID.")
-    elif username and password:
-        try:
-            cl.login(username, password)
-            cl.dump_settings(settings_file)
-            logger.info("Instagram login successful.")
-        except ChallengeRequired:
-            raise ValueError(
-                "Instagram requires identity verification for this login. "
-                "Use the session ID method instead: log into instagram.com in Chrome, "
-                "open DevTools → Application → Cookies → instagram.com, "
-                "copy the 'sessionid' cookie value, and add INSTAGRAM_SESSION_ID=<value> to your .env file."
-            )
-        except BadPassword:
-            raise ValueError("Instagram login failed: incorrect username or password.")
-        except Exception as e:
-            raise ValueError(
-                f"Instagram login failed: {e}. "
-                "Add INSTAGRAM_SESSION_ID to your .env (from browser cookies) for reliable access."
-            )
-    else:
-        raise ValueError(
-            "No Instagram credentials set. Add INSTAGRAM_SESSION_ID to your .env file. "
-            "Get it from Chrome → instagram.com → F12 → Application → Cookies → sessionid."
+        raise RuntimeError(
+            "curl-cffi is not installed. Run: pip install curl-cffi"
         )
 
-    return cl
+    product_id = _myntra_product_id(url)
 
+    _HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
-def fetch_instagram_comments(url: str, max_comments: int = 50) -> dict:
-    cl = _get_instagram_client()
-    shortcode = _instagram_shortcode(url)
+    with cf_requests.Session(impersonate="chrome120") as session:
+        # Load the product page to establish session cookies and grab the title
+        pg = session.get(url, headers=_HEADERS, timeout=20)
+        if pg.status_code not in (200, 301, 302):
+            raise ValueError(
+                f"Myntra product page returned HTTP {pg.status_code}. Check the URL."
+            )
 
-    try:
-        from instagrapi.exceptions import MediaNotFound, MediaUnavailable
-        pk = cl.media_pk_from_code(shortcode)
-        media = cl.media_info(pk)
-    except Exception as e:
-        raise ValueError(f"Could not fetch Instagram post: {e}")
+        title_m = re.search(r"<title>(.*?)</title>", pg.text)
+        raw_title = title_m.group(1) if title_m else ""
+        for suffix in [
+            "- Buy Online at Best Price in India",
+            "| Myntra",
+            "Buy ",
+        ]:
+            raw_title = raw_title.replace(suffix, "")
+        # Remove trailing product ID digits that sometimes appear in the <title>
+        raw_title = re.sub(r'\s*\d{6,10}\s*$', '', raw_title)
+        title = raw_title.strip(" -|") or f"Myntra Product {product_id}"
 
-    caption = (media.caption_text or "").strip()
-    title = caption[:120] + ("…" if len(caption) > 120 else "") if caption else "No caption"
-    author = media.user.username if media.user else "unknown"
-    total_available = media.comment_count or 0
+        # Fetch review pages
+        reviews: list[str] = []
+        total_available = 0
+        page_num = 1
+        page_size = 10
 
-    comments: list[str] = []
-    try:
-        raw = cl.media_comments(media.id, amount=max_comments)
-        comments = [c.text.strip() for c in raw if c.text.strip()]
-    except Exception as e:
-        logger.warning("Error fetching Instagram comments: %s", e)
+        api_headers = {
+            **_HEADERS,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": url,
+        }
+
+        while len(reviews) < max_reviews:
+            api_url = (
+                f"https://www.myntra.com/web/v1/reviews/product/{product_id}"
+                f"?size={page_size}&page={page_num}"
+            )
+            resp = session.get(api_url, headers=api_headers, timeout=15)
+            if resp.status_code != 200:
+                break
+
+            data = resp.json()
+            batch = data.get("reviews", [])
+            if not batch:
+                break
+
+            for r in batch:
+                text = (r.get("review") or "").strip()
+                if text:
+                    reviews.append(text)
+
+            if not total_available:
+                total_available = (
+                    data.get("reviewsMetaData", {}).get("reviewCount", 0)
+                )
+
+            if len(batch) < page_size:
+                break
+            page_num += 1
+
+    if not reviews:
+        raise ValueError(
+            "No reviews found for this Myntra product. "
+            "The product may have no reviews yet."
+        )
 
     return {
-        "platform": "instagram",
+        "platform": "myntra",
         "title": title,
-        "author": author,
+        "author": "Myntra Customers",
         "url": url,
-        "total_available": total_available,
-        "comments": comments,
+        "total_available": total_available or len(reviews),
+        "comments": reviews[:max_reviews],
     }
 
 
 def fetch_comments(url: str, max_comments: int = 50) -> dict:
-    """Detect platform and return comments + post metadata."""
+    """Detect platform and return comments/reviews + post metadata."""
     platform = detect_platform(url)  # raises ValueError for unsupported URLs
-    if platform == "instagram":
-        return fetch_instagram_comments(url, max_comments)
+    if platform == "myntra":
+        return fetch_myntra_reviews(url, max_comments)
     return fetch_youtube_comments(url, max_comments)

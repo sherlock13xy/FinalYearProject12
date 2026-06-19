@@ -52,7 +52,7 @@ SentimentIQ is a full-stack web application that performs deep NLP analysis on t
 It supports three analysis modes:
 - **Single** — one text at a time
 - **Bulk** — up to 100 texts via JSON or CSV upload (500 rows)
-- **URL** — YouTube/Instagram post comment analysis
+- **URL** — YouTube video comment analysis + Myntra product review analysis
 
 Additional platform features:
 - **JWT authentication** — login/register, role-based access (`admin` / `user`)
@@ -75,8 +75,8 @@ Additional platform features:
 | ML Framework | PyTorch 2.4.1 (CPU build) + HuggingFace Transformers 4.44.2 |
 | Auth | python-jose (JWT), passlib (bcrypt) |
 | PDF Generation | fpdf2 |
-| Instagram API | instagrapi |
 | YouTube API | google-api-python-client |
+| Myntra Scraping | curl-cffi (Chrome TLS impersonation) |
 | Language Detection | langdetect |
 | Translation | Helsinki-NLP OPUS-MT (MarianMT) |
 | Data Processing | pandas, numpy |
@@ -346,9 +346,6 @@ Uses `pydantic-settings` (`BaseSettings`) to read from `.env` file.
 | `SECRET_KEY` | `change-me-in-production` | JWT signing secret |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` | JWT TTL (24 hours) |
 | `YOUTUBE_API_KEY` | `""` | YouTube Data API v3 key |
-| `INSTAGRAM_USERNAME` | `""` | Instagram credentials |
-| `INSTAGRAM_PASSWORD` | `""` | Instagram credentials |
-| `INSTAGRAM_SESSION_ID` | `""` | Instagram session cookie |
 
 ---
 
@@ -569,7 +566,20 @@ Three functions: `generate_url_analysis_pdf`, `generate_single_analysis_pdf`, `g
 
 #### `modules/url_fetcher.py`
 
-**`fetch_youtube_comments(url, max_comments)`**, **`fetch_instagram_comments(url, max_comments)`** — return comment lists with post metadata.
+**`detect_platform(url)`** — returns `'youtube'` or `'myntra'`; raises `ValueError` for unsupported URLs. Instagram support was removed.
+
+**`fetch_youtube_comments(url, max_comments)`** — fetches YouTube comments via the YouTube Data API v3. Requires `YOUTUBE_API_KEY` in `.env`.
+
+**`fetch_myntra_reviews(url, max_reviews)`** — fetches Myntra product reviews using `curl_cffi` with Chrome 120 TLS impersonation:
+1. Extracts the numeric product ID from the URL path (regex `\d{6,10}`)
+2. Loads the product page to establish session cookies (used by Myntra's CDN and anti-bot layer)
+3. Parses the `<title>` tag for the product name
+4. Calls Myntra's internal proxy endpoint `/web/v1/reviews/product/{id}?size=10&page={n}` in a loop, extracting text from the `review` field of each result object
+5. Stops when fewer than `size` results are returned (last page) or `max_reviews` is reached
+6. Returns total count from `reviewsMetaData.reviewCount`
+7. Falls back gracefully — raises `ValueError` with a user-friendly message if no reviews are found
+
+**`fetch_comments(url, max_comments)`** — dispatcher: routes `youtube` URLs to `fetch_youtube_comments`, `myntra` URLs to `fetch_myntra_reviews`.
 
 ---
 
@@ -701,7 +711,7 @@ Returns:
 
 #### `routers/url_analysis.py`
 
-**`POST /api/v1/analyze-url`** — YouTube/Instagram analysis.
+**`POST /api/v1/analyze-url`** — YouTube or Myntra analysis. Accepts `{url, max_comments}`. Calls `fetch_comments()` which auto-detects platform, then passes the returned text list through the standard sentiment pipeline, aggregates results, and returns `URLAnalysisResponse`.
 
 ---
 
@@ -772,8 +782,10 @@ ReportReview      {status, correct_label?, keywords?}
 #### `src/App.tsx`
 
 - Sets up `<BrowserRouter>` with `<Routes>`
-- On mount: reads `themeId` from Zustand, calls `applyTheme()`
-- **`RequireAdmin` guard component**: reads `user` from store, redirects to `/dashboard` if `user.role !== 'admin'`
+- **`ThemeApplier`** component: reads `themeId` from Zustand, calls `applyTheme()` on mount and on change
+- **`ClearAuthOnStartup`** component: calls `logoutUser()` once on mount — clears `token` and `user` from both the Zustand store and `localStorage` on every page load, ensuring the login page is always shown first regardless of any previously stored session
+- **`RequireAuth` guard**: redirects to `/login` if `token` is null
+- **`RequireAdmin` guard**: redirects to `/dashboard` if `user.role !== 'admin'`
 - Route map:
 
 | Path | Component | Guard |
@@ -821,7 +833,7 @@ Fetches analytics on mount. Renders:
 - **Charts row 1** (3 columns):
   - `PieChart`: Sentiment distribution
   - `BarChart`: Top 6 emotions (vertical bars)
-  - `PieChart`: Language distribution
+  - `PieChart`: Language distribution — shows top 5 languages + an "Others" bucket for the remainder; uses a custom flex-wrap legend below the donut instead of the default Recharts legend (prevents overflow with many language codes)
 - **Charts row 2** (2 columns):
   - Horizontal `BarChart` (`layout="vertical"`): Tone breakdown (all 8 tones)
   - Horizontal `BarChart` (`layout="vertical"`): Intent breakdown (all 8 intents)
@@ -852,7 +864,17 @@ Two tabs: Text Input and CSV Upload. Results panel: KPIs, distributions, paginat
 
 #### `pages/URLAnalysis.tsx`
 
-URL input, platform detection badge, max comments slider. Results: post metadata, KPIs, distributions, Most Positive/Negative highlights, comments table, Export PDF button. *(processing_time display removed from results header)*
+URL input with platform auto-detection badge (YouTube → red, Myntra → fuchsia). Max comments/reviews slider. Platform tip cards shown when the input is empty.
+
+Results panel:
+- Post/product metadata card (platform badge, title, author, comment count, Export PDF button)
+- KPI row: Comments Analysed, Dominant Sentiment, Dominant Emotion, Avg Confidence
+- Sentiment Distribution + Top Emotions bar charts
+- Most Positive / Most Negative highlighted comment cards
+- Paginated comments table (15/page) with search + sentiment filter
+- Each comment row is expandable — expanded view shows Emotion, Tone, Intent, Confidence mini-cards, interpretation, and a **Report Issue** button (red flag icon) that opens `ReportModal` pre-filled with that comment's text and predicted sentiment label
+
+Platforms supported: **YouTube** (via YouTube Data API v3) and **Myntra** (via internal reviews API). Instagram support was removed.
 
 ---
 
@@ -1069,7 +1091,8 @@ User                { id, username, email, role: 'admin'|'user', created_at }
 SentimentResult, SarcasmResult, EmotionResult, ToneResult, IntentResult
 SingleAnalysisResponse
 BulkAnalysisItem, BulkAnalysisResponse
-PostMetadata, URLAnalysisResponse
+PostMetadata        { platform: 'youtube' | 'myntra', title, author, url, fetched_comments, total_available }
+URLAnalysisResponse
 AnalyticsData       { trend_data[], top_words[], recent_reviews[], ... }
 HistoryRecord
 
@@ -1123,7 +1146,7 @@ Base URL: `http://localhost:8000/api/v1`
 | GET | `/history/{id}` | User | Single history record |
 | DELETE | `/history/{id}` | User | Delete one record |
 | DELETE | `/history` | User | Clear all records |
-| POST | `/analyze-url` | User | YouTube/Instagram comment analysis |
+| POST | `/analyze-url` | User | YouTube or Myntra review analysis |
 | POST | `/export-pdf` | User | Export URL analysis PDF |
 | POST | `/export-pdf/single` | User | Export single analysis PDF |
 | POST | `/export-pdf/bulk` | User | Export bulk analysis PDF |
@@ -1368,9 +1391,7 @@ LOG_LEVEL=INFO
 SECRET_KEY=change-me-in-production
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 YOUTUBE_API_KEY=<your-key>
-INSTAGRAM_USERNAME=<username>
-INSTAGRAM_PASSWORD=<password>
-INSTAGRAM_SESSION_ID=<session-cookie>
+# No additional credentials required for Myntra — curl_cffi impersonates Chrome 120
 ```
 
 ### Frontend (`frontend/.env`)
@@ -1509,4 +1530,4 @@ Content-Type: application/json
 
 ---
 
-*Updated: 2026-06-16*
+*Updated: 2026-06-19*

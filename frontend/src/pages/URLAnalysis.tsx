@@ -1,22 +1,23 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Link2, Youtube, Instagram, Search, ChevronDown, ChevronUp,
-  AlertCircle, TrendingUp, Users, BarChart2, Zap, ExternalLink, Download,
+  Link2, Youtube, ShoppingBag, Search, ChevronDown, ChevronUp,
+  AlertCircle, TrendingUp, Users, BarChart2, Zap, ExternalLink, Download, Flag,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAppStore } from '@/store'
 import { analyzeURL, exportURLAnalysisPDF } from '@/lib/api'
 import { BulkAnalysisItem, URLAnalysisResponse } from '@/types'
 import { cn } from '@/lib/utils'
+import { ReportModal } from '@/components/ReportModal'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-function detectPlatform(url: string): 'youtube' | 'instagram' | null {
+function detectPlatform(url: string): 'youtube' | 'myntra' | null {
   try {
     const host = new URL(url).hostname.replace('www.', '')
     if (['youtube.com', 'youtu.be', 'm.youtube.com'].includes(host)) return 'youtube'
-    if (['instagram.com', 'm.instagram.com'].includes(host)) return 'instagram'
+    if (host === 'myntra.com') return 'myntra'
   } catch { /* not a valid URL yet */ }
   return null
 }
@@ -55,10 +56,10 @@ function PlatformBadge({ platform }: { platform: string }) {
       </span>
     )
   }
-  if (platform === 'instagram') {
+  if (platform === 'myntra') {
     return (
-      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-pink-500/15 border border-pink-500/30 text-pink-400">
-        <Instagram size={12} /> Instagram
+      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-fuchsia-500/15 border border-fuchsia-500/30 text-fuchsia-400">
+        <ShoppingBag size={12} /> Myntra
       </span>
     )
   }
@@ -108,6 +109,7 @@ function DistributionBar({ label, count, total, color }: {
 
 function CommentRow({ item, index }: { item: BulkAnalysisItem; index: number }) {
   const [expanded, setExpanded] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   return (
     <div className="border-b border-white/5 last:border-0">
       <button
@@ -132,7 +134,7 @@ function CommentRow({ item, index }: { item: BulkAnalysisItem; index: number }) 
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+            <div className="px-4 pb-3 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
               {[
                 { label: 'Emotion',    value: item.emotion.label,    conf: item.emotion.confidence },
                 { label: 'Tone',       value: item.tone.label,       conf: item.tone.intensity },
@@ -149,13 +151,28 @@ function CommentRow({ item, index }: { item: BulkAnalysisItem; index: number }) 
               ))}
             </div>
             {item.interpretation && (
-              <div className="mx-4 mb-4 p-3 bg-indigo-500/5 border border-indigo-500/15 rounded-lg">
+              <div className="mx-4 mb-3 p-3 bg-indigo-500/5 border border-indigo-500/15 rounded-lg">
                 <p className="text-[11px] text-slate-400 leading-relaxed">{item.interpretation}</p>
               </div>
             )}
+            <div className="px-4 pb-4 flex justify-end">
+              <button
+                onClick={(e) => { e.stopPropagation(); setReportOpen(true) }}
+                className="flex items-center gap-1.5 text-xs text-red-400 border border-red-500/30 hover:border-red-500/60 hover:bg-red-500/10 px-2.5 py-1 rounded-lg transition-colors"
+              >
+                <Flag size={11} /> Report Issue
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ReportModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        text={item.original_text}
+        modelLabel={item.sentiment.label}
+      />
     </div>
   )
 }
@@ -213,7 +230,7 @@ function ResultsPanel({ result }: { result: URLAnalysisResponse }) {
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1.5">
-              <PlatformBadge platform={post.platform as 'youtube' | 'reddit'} />
+              <PlatformBadge platform={post.platform} />
               <span className="text-xs text-slate-500">by {post.author}</span>
             </div>
             <h2 className="text-sm font-semibold text-white leading-snug line-clamp-2">{post.title}</h2>
@@ -392,7 +409,7 @@ export default function URLAnalysis() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white">URL Analysis</h1>
-        <p className="text-sm text-slate-400 mt-1">Paste a YouTube video or Instagram post URL to analyse its comment section.</p>
+        <p className="text-sm text-slate-400 mt-1">Paste a YouTube video or Myntra product URL to analyse its comments and reviews.</p>
       </div>
 
       {/* Input card */}
@@ -408,7 +425,7 @@ export default function URLAnalysis() {
               value={url}
               onChange={e => setUrl(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAnalyse()}
-              placeholder="https://www.youtube.com/watch?v=… or https://www.instagram.com/p/…"
+              placeholder="https://www.youtube.com/watch?v=… or https://www.myntra.com/…/12345678/buy"
               className="w-full pl-9 pr-32 py-2.5 text-sm rounded-lg bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
             />
             {platform && (
@@ -456,17 +473,18 @@ export default function URLAnalysis() {
         {/* Platform tips */}
         {!platform && !url && (
           <div className="grid grid-cols-2 gap-3 pt-1">
-            {[
-              { icon: Youtube,    label: 'YouTube',   example: 'youtube.com/watch?v=…',  color: 'text-red-400',  bg: 'bg-red-500/10 border-red-500/20' },
-              { icon: Instagram,  label: 'Instagram', example: 'instagram.com/p/…',       color: 'text-pink-400', bg: 'bg-pink-500/10 border-pink-500/20' },
-            ].map(({ icon: Icon, label, example, color, bg }) => (
-              <div key={label} className={cn('rounded-lg border p-3', bg)}>
-                <div className={cn('flex items-center gap-1.5 mb-1 text-xs font-semibold', color)}>
-                  <Icon size={12} /> {label}
-                </div>
-                <p className="text-[10px] text-slate-500">{example}</p>
+            <div className="rounded-lg border bg-red-500/10 border-red-500/20 p-3">
+              <div className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-red-400">
+                <Youtube size={12} /> YouTube
               </div>
-            ))}
+              <p className="text-[10px] text-slate-500">youtube.com/watch?v=…</p>
+            </div>
+            <div className="rounded-lg border bg-fuchsia-500/10 border-fuchsia-500/20 p-3">
+              <div className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-fuchsia-400">
+                <ShoppingBag size={12} /> Myntra
+              </div>
+              <p className="text-[10px] text-slate-500">myntra.com/…/12345678/buy</p>
+            </div>
           </div>
         )}
       </div>
