@@ -1,1533 +1,499 @@
-# SentimentIQ — Complete Codebase Documentation
+# Codebase Gist — Sentiment Intelligence Platform
 
-> Multilingual AI-powered sentiment analysis platform with emotion, tone, intent detection, social media comment analysis, user authentication, admin management, and an ML correction system.
+## What this project is
 
----
+A full-stack, multilingual NLP analytics platform (Final Year Project). It takes raw text — typed directly, uploaded as a CSV, or scraped from a YouTube/Myntra URL — and runs it through an 8-stage AI pipeline that produces sentiment, sarcasm, emotion, tone, intent, a human-readable interpretation, and a suggested reply. Results are persisted to SQLite, aggregated into a live analytics dashboard, exportable as branded PDF reports, and improvable over time through an admin-driven correction/retraining loop.
 
-## Table of Contents
-
-1. [Project Overview](#1-project-overview)
-2. [Tech Stack](#2-tech-stack)
-3. [Directory Structure](#3-directory-structure)
-4. [Full Analysis Pipeline](#4-full-analysis-pipeline)
-5. [Backend — File by File](#5-backend--file-by-file)
-   - [Entry Point](#51-mainpy--entry-point)
-   - [Configuration](#52-configpy--configuration)
-   - [Database](#53-database)
-   - [Modules (ML)](#54-modules--ml-processing)
-   - [Routers (API)](#55-routers--api-endpoints)
-   - [Schemas](#56-schemas--validation)
-   - [Auth](#57-auth--authentication)
-6. [Frontend — File by File](#6-frontend--file-by-file)
-   - [Entry & Routing](#61-entry--routing)
-   - [Pages](#62-pages)
-   - [Analysis Cards](#63-analysis-component-cards)
-   - [UI Primitives](#64-ui-primitives)
-   - [Layout](#65-layout-components)
-   - [State & API](#66-state--api-layer)
-   - [Utilities & Themes](#67-utilities--themes)
-   - [Types](#68-types)
-7. [ML Models Reference](#7-ml-models-reference)
-8. [API Endpoints Reference](#8-api-endpoints-reference)
-9. [Data Flow Walkthroughs](#9-data-flow-walkthroughs)
-10. [Database Schema](#10-database-schema)
-11. [Environment Variables](#11-environment-variables)
-12. [Sample Requests & Responses](#12-sample-requests--responses)
+**Stack:** FastAPI + SQLAlchemy + SQLite backend, HuggingFace Transformers/PyTorch models, React 18 + TypeScript + Vite + Tailwind frontend, Zustand for state, JWT-based auth with role-based (`user` / `admin`) access control.
 
 ---
 
-## 1. Project Overview
+## 1. System Architecture
 
-SentimentIQ is a full-stack web application that performs deep NLP analysis on text input. It goes beyond simple positive/negative classification by detecting:
+```
+┌──────────────────────────────┐         HTTPS/JSON          ┌───────────────────────────────┐
+│   React 18 + TS Frontend     │ ───────────────────────────▶ │   FastAPI Backend (Python)    │
+│   (Vite dev server :5173)    │ ◀─────────────────────────── │   (Uvicorn :8000)             │
+│                               │        Bearer JWT             │                                │
+│  Zustand store (auth, theme) │                               │  Routers → Modules → Models    │
+│  Axios client (lib/api.ts)   │                               │  SQLAlchemy ORM → SQLite       │
+└──────────────────────────────┘                               └───────────────┬───────────────┘
+                                                                                 │
+                                                        ┌────────────────────────┼────────────────────────┐
+                                                        ▼                        ▼                        ▼
+                                              HuggingFace Transformers   YouTube Data API v3      Myntra (curl_cffi,
+                                              models (cached locally,    (comment fetch)          browser-impersonation
+                                              PyTorch CPU/CUDA)                                    scraping of reviews API)
+```
 
-- **Sentiment** — positive / negative / neutral with confidence
-- **Sarcasm/Irony** — detects ironic text and flips sentiment accordingly
-- **Emotion** — Joy, Anger, Disgust, Disappointment, Frustration, Excitement, Appreciation, Neutral
-- **Tone** — professional, casual, sarcastic, aggressive, critical, appreciative, formal, informal
-- **Intent** — complaint, appreciation, inquiry, request, suggestion, feedback, threat, praise
-- **Language** — 22 supported languages with automatic translation to English
-- **Interpretation** — human-readable paragraph summarising the analysis
-- **Suggested Response** — context-aware reply template
-
-It supports three analysis modes:
-- **Single** — one text at a time
-- **Bulk** — up to 100 texts via JSON or CSV upload (500 rows)
-- **URL** — YouTube video comment analysis + Myntra product review analysis
-
-Additional platform features:
-- **JWT authentication** — login/register, role-based access (`admin` / `user`)
-- **User reports** — users can flag wrong predictions; admins review and fix them
-- **ML correction system** — admin-approved fixes update the in-memory correction cache and retrain the model on the fly
-- **Admin Overview** — user management (restrict/delete), storage gauge, data clear buttons
-- **Persistent correction cache** — survives server restarts via DB reload on startup
+**Request flow for a typical analysis:** Frontend → `POST /api/v1/analyze` (JWT in header) → `routers/analysis.py` → `modules/pipeline.analyze_text()` runs the 8-step AI pipeline → result persisted as an `AnalysisRecord` row → JSON returned to frontend → rendered as per-signal cards on `SingleAnalysis.tsx`.
 
 ---
 
-## 2. Tech Stack
+## 2. The Core AI Pipeline (`modules/pipeline.py::analyze_text`)
 
-### Backend
-| Layer | Technology |
-|---|---|
-| Framework | FastAPI 0.115.0 |
-| ASGI Server | Uvicorn |
-| ORM | SQLAlchemy 2.0.35 |
-| Database | SQLite (file: `sentiment_platform.db`) |
-| ML Framework | PyTorch 2.4.1 (CPU build) + HuggingFace Transformers 4.44.2 |
-| Auth | python-jose (JWT), passlib (bcrypt) |
-| PDF Generation | fpdf2 |
-| YouTube API | google-api-python-client |
-| Myntra Scraping | curl-cffi (Chrome TLS impersonation) |
-| Language Detection | langdetect |
-| Translation | Helsinki-NLP OPUS-MT (MarianMT) |
-| Data Processing | pandas, numpy |
+Every piece of text — typed, CSV row, or scraped comment — passes through the same pipeline:
 
-### Frontend
-| Layer | Technology |
-|---|---|
-| Framework | React 18.3.1 |
-| Build Tool | Vite 5.4.21 |
-| Language | TypeScript 5.9.3 |
-| Routing | React Router DOM 6.30.3 |
-| State | Zustand 4.5.7 |
-| Styling | Tailwind CSS 3.4.19 |
-| Animations | Framer Motion 10.18.0 |
-| Charts | Recharts 2.15.4 |
-| Icons | Lucide React 0.294.0 |
-| HTTP | Axios 1.16.1 |
-| Notifications | React Hot Toast 2.6.0 |
-| File Upload | React Dropzone 14.4.1 |
+```
+                                  INPUT TEXT
+                                       │
+                         ┌─────────────▼─────────────┐
+                         │ 1. LANGUAGE DETECTION      │  langdetect + Hinglish heuristics
+                         │    (language_detector.py)  │  (Devanagari & Romanized Hindi)
+                         └─────────────┬──────────────┘
+                                       │ non-English only
+                         ┌─────────────▼──────────────┐
+                         │ 2. TRANSLATION              │  Google Translate (deep-translator) first,
+                         │    (translation.py)          │  MarianMT (opus-mt-*) as offline fallback.
+                         │                               │  Skipped entirely for romanized Hinglish
+                         └─────────────┬──────────────┘
+                                       │
+                         ┌─────────────▼──────────────┐
+                         │ 3. CORRECTION CACHE LOOKUP  │  Exact/case-insensitive match against
+                         │    (pipeline._lookup_        │  admin-approved corrections. If hit,
+                         │     correction)               │  skips model inference entirely and
+                         │                               │  forces 94% confidence on that label.
+                         └─────────────┬──────────────┘
+                                       │ (cache miss)
+                         ┌─────────────▼──────────────┐
+                         │ 4. SENTIMENT ANALYSIS        │  DistilBERT-multilingual → 768-dim
+                         │    (sentiment.py)             │  embedding → Logistic Regression (35%)
+                         │                               │  + Twitter-RoBERTa-sentiment (65%)
+                         │                               │  + emoji signal adjustment
+                         └─────────────┬──────────────┘
+                                       │
+                         ┌─────────────▼──────────────┐
+                         │ 5. SARCASM DETECTION         │  twitter-roberta-base-irony, threshold
+                         │    (sarcasm.py)               │  0.70 → flips positive→negative
+                         │                               │  (skipped if label came from a           │
+                         │                               │   correction — human override wins)      │
+                         └─────────────┬──────────────┘
+                                       │
+                         ┌─────────────▼──────────────┐
+                         │ 6. EMOTION DETECTION         │  GoEmotions distilRoBERTa + sentiment-
+                         │    (emotion.py)               │  emotion alignment post-processing
+                         └─────────────┬──────────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+          ┌─────────▼─────────┐                 ┌─────────▼─────────┐
+          │ 7a. TONE           │                 │ 7b. INTENT         │
+          │ (tone.py)           │                 │ (intent.py)         │
+          │ Zero-shot NLI       │                 │ Zero-shot NLI       │
+          │ DistilBERT-MNLI     │                 │ DistilBERT-MNLI     │
+          │ 8 classes           │                 │ 8 classes           │
+          └─────────┬─────────┘                 └─────────┬─────────┘
+                    └──────────────────┬──────────────────┘
+                         ┌─────────────▼──────────────┐
+                         │ 8a. INTERPRETATION           │  Rule-based synthesis of all signals
+                         │     (interpretation.py)       │
+                         └─────────────┬──────────────┘
+                         ┌─────────────▼──────────────┐
+                         │ 8b. SUGGESTED RESPONSE       │  Template lookup keyed by
+                         │     (response_generator.py)   │  sentiment × intent × tone
+                         └─────────────┬──────────────┘
+                                       ▼
+                                  FINAL RESULT
+             {sentiment, sarcasm, emotion, tone, intent, interpretation,
+              suggested_response, language, translation, processing_time}
+```
+
+### AI models used
+
+| Stage | Model | Notes |
+|---|---|---|
+| Sentiment | `distilbert-base-multilingual-cased` (embeddings) + Logistic Regression | LR trained in-memory at startup on seed examples; 35% ensemble weight |
+| Sentiment | `cardiffnlp/twitter-roberta-base-sentiment-latest` | Tweet-native, 65% ensemble weight |
+| Sarcasm | `cardiffnlp/twitter-roberta-base-irony` | Threshold 0.70, flips positive→negative |
+| Emotion | `j-hartmann/emotion-english-distilroberta-base` (GoEmotions) | Aligned against sentiment post-hoc |
+| Tone + Intent | `typeform/distilbert-base-uncased-mnli` | Zero-shot NLI, shared model, two label sets |
+| Translation | Google Translate (`deep-translator`, no API key) → Helsinki-NLP `opus-mt-*` (MarianMT) fallback | Google Translate tried first for any language; MarianMT per-language models used only if it fails |
+
+**Supported languages:** English, Hindi, Bengali, Assamese, Hinglish (Devanagari + Roman), Urdu, Tamil, Telugu, Gujarati, French, German, Spanish, Italian, Portuguese, Russian, Chinese, Japanese, Korean, Arabic.
 
 ---
 
-## 3. Directory Structure
+## 3. URL Analysis Flow (YouTube / Myntra)
+
+```
+URL pasted ──► modules/url_fetcher.detect_platform()
+                     │
+        ┌────────────┴────────────┐
+        ▼                         ▼
+YouTube URL                Myntra product URL
+  │                                │
+  ▼                                ▼
+YouTube Data API v3         curl_cffi session impersonating Chrome 120
+(video metadata +           → loads product page (title) → paginates
+ up to 100 top comments      Myntra's internal /web/v1/reviews/product/{id}
+ via commentThreads.list)    API → up to 100 reviews
+        │                                │
+        └────────────┬───────────────────┘
+                      ▼
+        each comment/review → full 8-step pipeline above
+                      ▼
+        aggregate: dominant sentiment/emotion/tone/intent + per-comment table
+```
+
+Myntra has no public reviews API, so `fetch_myntra_reviews()` in `modules/url_fetcher.py` impersonates a real Chrome browser via `curl_cffi` (TLS/JA3 fingerprint spoofing) to avoid being blocked, extracts the product ID from the URL path, scrapes the `<title>` tag for the product name, then paginates Myntra's internal reviews JSON endpoint directly.
+
+---
+
+## 4. Auth & Role-Based Access
+
+```
+Register/Login ──► auth/deps.py issues JWT (HS256, 7-day expiry, role embedded)
+                           │
+                 Bearer token on every request
+                           │
+        ┌──────────────────┴───────────────────┐
+        ▼                                        ▼
+  get_current_user()                     require_admin()
+  (any authenticated user)                (role must be "admin", else 403)
+        │                                        │
+  analyze / bulk / history /             admin/*, corrections/*,
+  url-analysis / export / reports        training-data, user-reports pages
+  (submit only)                          (review + resolve)
+```
+
+- Passwords hashed with bcrypt (`passlib`).
+- `is_active` flag lets admins restrict a user's account without deleting it.
+- Frontend guards routes client-side (`RequireAuth`, `RequireAdmin` in `App.tsx`) in addition to backend 401/403 enforcement.
+
+---
+
+## 5. Continuous-Improvement / Feedback Loop
+
+This is the platform's self-correction mechanism — the most distinctive architectural piece beyond the base pipeline:
+
+```
+User sees a wrong result on SingleAnalysis/BulkAnalysis/URLAnalysis
+        │  (ReportModal.tsx)
+        ▼
+POST /api/v1/reports  ──►  UserReport row (status="pending")
+        │
+        ▼  Admin reviews on UserReports.tsx (User Reports admin page)
+PATCH /api/v1/reports/{id}  { status: "fixed", correct_label, keywords }
+        │
+        ├──► creates a CorrectionEntry row (text, correct_label, keywords)
+        ├──► retroactively updates matching AnalysisRecord rows so History
+        │      reflects the fix immediately
+        └──► pushes the correction into the in-memory correction cache
+               (SentimentAnalyzer._correction_cache) for instant effect
+                      │
+                      ▼
+        Next analyze_text() call on that exact text short-circuits the
+        model ensemble and returns the corrected label (see pipeline step 3)
+```
+
+Additional admin tooling around this loop (`routers/corrections.py`, `TrainingData.tsx`):
+- `GET /corrections/stats` — label breakdown + top correction keywords, `needs_retrain` flips true at 20 pending corrections (`RETRAIN_THRESHOLD`).
+- `POST /corrections/fetch-online` — pulls additional labeled samples to enrich the seed training set.
+- `POST /corrections/retrain` — rebuilds the Logistic Regression head using all accumulated corrections.
+- Corrections persist in SQLite and are **reloaded into the in-memory cache on every server restart** (see `main.py` lifespan handler), so fixes are never lost.
+
+---
+
+## 6. Admin Panel (`AdminOverview.tsx`, `routers/admin.py`)
+
+- **User management:** list all users, toggle `is_active` (restrict/unrestrict), delete users (cannot self-restrict/self-delete).
+- **Storage gauge:** SQLite file size vs. a 500 MB soft cap, plus row counts for analyses/corrections/reports.
+- **Data lifecycle:** `DELETE /admin/clear-analysis` (wipe analysis history) and `DELETE /admin/clear-all` (wipe analyses + corrections + reports, users kept).
+
+---
+
+## 7. Directory Structure
 
 ```
 FinalYearProject/
 ├── backend/
-│   ├── main.py                        # FastAPI app, startup, CORS, routers
-│   ├── config.py                      # Settings via pydantic-settings
-│   ├── requirements.txt               # Python dependencies
-│   ├── sentiment_platform.db          # SQLite database file
+│   ├── main.py                      # FastAPI app, CORS, router mounts, lifespan startup
+│   ├── config.py                    # Pydantic settings (.env-driven)
+│   │
 │   ├── auth/
-│   │   ├── __init__.py
-│   │   └── deps.py                    # JWT helpers, password hashing, require_admin dep
-│   ├── database/
-│   │   ├── __init__.py
-│   │   ├── connection.py              # Engine, session factory, init_db(), migration
-│   │   └── models.py                  # User, AnalysisRecord, CorrectionEntry, UserReport ORM models
-│   ├── modules/
-│   │   ├── pipeline.py                # Main orchestrator — calls all modules
-│   │   ├── sentiment.py               # BERT + RoBERTa + LR ensemble + correction cache
-│   │   ├── emotion.py                 # GoEmotions distilRoBERTa
-│   │   ├── tone.py                    # Zero-shot NLI tone classifier
-│   │   ├── intent.py                  # Zero-shot NLI intent classifier
-│   │   ├── sarcasm.py                 # Twitter-RoBERTa irony detector
-│   │   ├── language_detector.py       # langdetect + Hinglish heuristics
-│   │   ├── translation.py             # MarianMT multilingual translation
-│   │   ├── interpretation.py          # Rule-based interpretation generator
-│   │   ├── response_generator.py      # Template-based response generator
-│   │   ├── analytics.py               # Dashboard aggregation logic
-│   │   ├── pdf_generator.py           # fpdf2 PDF report builder
-│   │   └── url_fetcher.py             # YouTube + Instagram comment scraper
+│   │   └── deps.py                  # JWT issue/verify, bcrypt hashing, get_current_user/require_admin
+│   │
+│   ├── modules/                     # AI/ML pipeline + integrations
+│   │   ├── pipeline.py              # Orchestration — analyze_text(), correction lookup, emotion alignment
+│   │   ├── language_detector.py     # langdetect + Hinglish heuristics
+│   │   ├── translation.py           # translate_to_english(): Google Translate primary, MarianMT fallback
+│   │   ├── sentiment.py             # BERT+LR ensemble, correction cache, retraining, online data fetch
+│   │   ├── sarcasm.py               # twitter-roberta-base-irony detector
+│   │   ├── emotion.py               # GoEmotions distilRoBERTa
+│   │   ├── tone.py                  # Zero-shot NLI tone classifier
+│   │   ├── intent.py                # Zero-shot NLI intent classifier
+│   │   ├── interpretation.py        # Rule-based contextual synthesis
+│   │   ├── response_generator.py    # Template response suggestions
+│   │   ├── analytics.py             # Dashboard aggregation + insights
+│   │   ├── url_fetcher.py           # YouTube Data API + Myntra reviews scraper (curl_cffi)
+│   │   └── pdf_generator.py         # PDF export (fpdf2)
+│   │
 │   ├── routers/
-│   │   ├── analysis.py                # POST /analyze
-│   │   ├── bulk.py                    # POST /bulk-analyze, POST /upload-csv
-│   │   ├── history.py                 # GET/DELETE /history
-│   │   ├── analytics.py               # GET /analytics
-│   │   ├── url_analysis.py            # POST /analyze-url
-│   │   ├── export.py                  # POST /export-pdf (3 variants)
-│   │   ├── auth.py                    # POST /auth/register, /auth/login, GET /auth/me
-│   │   ├── corrections.py             # Correction CRUD + retrain
-│   │   ├── reports.py                 # User reports + admin review
-│   │   └── admin.py                   # Admin stats, user restrict/delete, data clear
-│   └── schemas/
-│       ├── __init__.py
-│       ├── analysis.py                # Pydantic models for text analysis
-│       ├── url_analysis.py            # Pydantic models for URL analysis
-│       ├── auth.py                    # RegisterRequest, LoginRequest, TokenResponse, UserOut
-│       └── reports.py                 # ReportCreate, ReportResponse, ReportReview
+│   │   ├── analysis.py              # POST /analyze
+│   │   ├── bulk.py                  # POST /bulk-analyze, POST /upload-csv
+│   │   ├── analytics.py             # GET /analytics
+│   │   ├── history.py               # GET/DELETE /history
+│   │   ├── url_analysis.py          # POST /analyze-url
+│   │   ├── export.py                # POST /export/pdf/*
+│   │   ├── auth.py                  # POST /auth/register, /auth/login, GET /auth/me
+│   │   ├── corrections.py           # Correction CRUD + retrain + online-data fetch (admin only)
+│   │   ├── reports.py               # User-submitted mis-classification reports + admin review
+│   │   └── admin.py                 # User management, storage stats, data wipe (admin only)
+│   │
+│   ├── database/
+│   │   ├── connection.py            # SQLAlchemy engine + session factory + init_db()
+│   │   └── models.py                # User, UserReport, CorrectionEntry, AnalysisRecord
+│   │
+│   ├── schemas/                     # Pydantic request/response models (mirrors routers/)
+│   └── requirements.txt
 │
 └── frontend/
-    ├── package.json
-    ├── vite.config.ts
-    ├── tailwind.config.js
-    ├── tsconfig.json
-    ├── index.html
     └── src/
-        ├── main.tsx                   # ReactDOM.createRoot, Toaster setup
-        ├── App.tsx                    # BrowserRouter, routes, RequireAdmin guard, theme init
-        ├── vite-env.d.ts
+        ├── App.tsx                  # Routes, RequireAuth/RequireAdmin guards
         ├── pages/
-        │   ├── Login.tsx              # Login form
-        │   ├── Register.tsx           # Registration form
-        │   ├── Dashboard.tsx          # Analytics + charts (sentiment, emotion, tone, intent, language, trend)
-        │   ├── SingleAnalysis.tsx     # Single text form + result cards
-        │   ├── BulkAnalysis.tsx       # Bulk text/CSV + results table
-        │   ├── URLAnalysis.tsx        # YouTube/Instagram analysis
-        │   ├── History.tsx            # Paginated history browser
-        │   ├── Settings.tsx           # Config, themes, model info
-        │   ├── AdminOverview.tsx      # Admin: user mgmt + storage gauge + data clear
-        │   ├── UserReports.tsx        # Admin: review/fix wrong prediction reports
-        │   └── TrainingData.tsx       # Admin: correction entries + retrain
+        │   ├── Login.tsx            # Register/login
+        │   ├── Dashboard.tsx        # KPI cards, charts, trend, keyword cloud
+        │   ├── SingleAnalysis.tsx   # Single text input + full result cards
+        │   ├── BulkAnalysis.tsx     # Bulk text / CSV upload + results table
+        │   ├── URLAnalysis.tsx      # YouTube / Myntra URL input + results
+        │   ├── History.tsx          # Paginated searchable history
+        │   ├── Settings.tsx         # Platform/theme settings
+        │   ├── AdminOverview.tsx    # Admin dashboard (users, storage)      [admin only]
+        │   ├── TrainingData.tsx     # Correction stats + retrain trigger    [admin only]
+        │   └── UserReports.tsx      # Review/resolve user-submitted reports [admin only]
         ├── components/
-        │   ├── Layout.tsx             # Sidebar + Outlet wrapper
-        │   ├── Sidebar.tsx            # Collapsible nav + backend health widget
-        │   ├── BackendStatus.tsx      # Backend connection indicator (used in Sidebar)
-        │   ├── analysis/
-        │   │   ├── SentimentCard.tsx
-        │   │   ├── EmotionCard.tsx
-        │   │   ├── ToneCard.tsx
-        │   │   ├── IntentCard.tsx
-        │   │   ├── LanguageCard.tsx
-        │   │   ├── InterpretationCard.tsx
-        │   │   └── ResponseCard.tsx
-        │   └── ui/
-        │       ├── Card.tsx
-        │       ├── Button.tsx
-        │       ├── Input.tsx
-        │       ├── Textarea.tsx
-        │       ├── Select.tsx
-        │       ├── Badge.tsx
-        │       ├── Progress.tsx
-        │       ├── Skeleton.tsx
-        │       └── Toast.tsx
+        │   ├── Layout.tsx, Sidebar.tsx, BackendStatus.tsx
+        │   ├── ReportModal.tsx      # "Report incorrect result" dialog (any user)
+        │   ├── CorrectionPanel.tsx  # Admin correction entry UI
+        │   ├── analysis/            # Per-signal result cards (Sentiment, Emotion, Tone, Intent, ...)
+        │   └── ui/                  # Button, Card, Input, Badge, Toast, Select, Progress, Skeleton
         ├── lib/
-        │   ├── api.ts                 # Axios client + all API functions
-        │   ├── utils.ts               # Color helpers, formatters
-        │   └── themes.ts              # 6 themes + applyTheme()
-        ├── store/
-        │   └── index.ts               # Zustand global store (user, token, analysis state)
-        └── types/
-            └── index.ts               # TypeScript interfaces
+        │   ├── api.ts               # Axios client, attaches JWT, base URL from VITE_API_URL
+        │   ├── themes.ts            # Theme definitions
+        │   └── utils.ts
+        ├── store/index.ts           # Zustand: auth (token/user/logout), theme
+        └── types/index.ts           # Shared TypeScript interfaces
 ```
 
 ---
 
-## 4. Full Analysis Pipeline
+## 8. Data Model (SQLite via SQLAlchemy)
 
-This is the core of the platform. Every text — whether from single input, bulk, or URL — flows through `modules/pipeline.py → analyze_text()`.
-
-```
-Input Text
-    │
-    ▼
-┌─────────────────────────────────────┐
-│  0. Correction Cache Check           │  In-memory dict on BERTLogisticSentimentAnalyzer
-│  → if text was admin-corrected:      │  Returns immediately with confidence=1.0
-│    return cached label immediately   │  Bypasses all ML inference
-└────────────────┬────────────────────┘
-                 │ (only if not cached)
-                 ▼
-┌─────────────────────────────────────┐
-│   1. Language Detection              │  langdetect library
-│   → language name, code, confidence  │  Returns: "Hindi", "hi", 0.99
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│   2. Hinglish Detection              │  Custom heuristics
-│   → is Devanagari mixed?             │  Checks script ratios
-│   → is Romanized Hinglish?           │  Checks Hindi word list
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│   3. Translation                     │  Helsinki-NLP MarianMT
-│   → if non-English: translate        │  Cached per language pair
-│     to English                       │  Hinglish uses hi→en model
-│   → pure romanized Hinglish:         │
-│     skip translation                 │
-└────────────────┬────────────────────┘
-                 │ (English text from here on)
-                 ▼
-┌─────────────────────────────────────┐
-│   4. Sentiment Analysis              │  BERT + RoBERTa + LR Ensemble
-│   → positive/negative/neutral        │  35% LR + 65% RoBERTa weights
-│   → confidence, probabilities        │  Emoji signal processing applied
-│   → negative margin guard            │  Min 55% confidence threshold
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│   5. Sarcasm Detection               │  cardiffnlp/twitter-roberta-irony
-│   → if detected (≥0.70) AND          │  Sarcasm override is SKIPPED when
-│     result is NOT from correction:   │  text was admin-corrected (from_correction flag)
-│     flip positive → negative         │
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│   6. Emotion Detection               │  j-hartmann/emotion-distilroberta
-│   → Joy/Anger/Disgust/etc.           │  28 raw labels → 8 display labels
-│   → confidence, all scores           │  Handles duplicate label merging
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│   7. Emotion-Sentiment Alignment     │  Post-processing rule
-│   → ensures emotion polarity         │  e.g. positive sentiment + Anger
-│     matches sentiment polarity       │  → emotion corrected to Joy
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│   8. Tone Detection                  │  typeform/distilbert-mnli
-│   → professional/casual/etc.         │  Zero-shot NLI classification
-│   → intensity (0.0–1.0)              │  8 candidate labels
-│   → all tone scores                  │
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│   9. Intent Detection                │  typeform/distilbert-mnli
-│   → complaint/appreciation/etc.      │  Zero-shot NLI classification
-│   → confidence, all scores           │  8 candidate labels
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│  10. Interpretation Generation       │  Rule-based text generation
-│   → human-readable paragraph         │  Combines all results above
-│   → key phrase extraction            │  ~20 combination mappings
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────┐
-│  11. Response Generation             │  Template lookup
-│   → suggested reply text             │  (sentiment, intent, tone) key
-│                                      │  Falls back through partial keys
-└────────────────┬────────────────────┘
-                 │
-                 ▼
-         Final Result Dict
-  {id, original_text, detected_language,
-   language_code, translated_text,
-   is_translation, sentiment, sarcasm,
-   emotion, tone, intent, interpretation,
-   suggested_response, processing_time,
-   word_count, char_count, timestamp}
-```
-
----
-
-## 5. Backend — File by File
-
-### 5.1 `main.py` — Entry Point
-
-The root FastAPI application.
-
-- Creates the `FastAPI` app with a **lifespan** context manager
-- On startup:
-  1. Calls `init_db()` to create/migrate tables
-  2. Calls `initialize_models()` to pre-load all ML models into memory
-  3. Reloads all `CorrectionEntry` rows from DB into the in-memory correction cache (so corrections survive server restarts)
-- Adds **CORSMiddleware** allowing configured origins
-- Mounts all routers under `/api/v1` prefix:
-  - `analysis`, `bulk`, `history`, `analytics`, `url_analysis`, `export`
-  - `auth`, `corrections`, `reports`, `admin`
-- Exposes `GET /health` returning `{status, database, models_loaded, timestamp}`
-- Exposes `GET /` returning version info
-- Global exception handlers for `ValueError` (400) and all others (500)
-
----
-
-### 5.2 `config.py` — Configuration
-
-Uses `pydantic-settings` (`BaseSettings`) to read from `.env` file.
-
-| Variable | Default | Purpose |
+| Table | Purpose | Key columns |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./sentiment_platform.db` | DB connection string |
-| `MODEL_CACHE_DIR` | `./model_cache` | HuggingFace model cache path |
-| `DEVICE` | `auto` | `cpu`, `cuda`, or `auto` |
-| `MAX_TEXT_LENGTH` | `512` | Max chars per text |
-| `CORS_ORIGINS` | `["http://localhost:5173"]` | Allowed frontend origins |
-| `LOG_LEVEL` | `INFO` | Python logging level |
-| `SECRET_KEY` | `change-me-in-production` | JWT signing secret |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` | JWT TTL (24 hours) |
-| `YOUTUBE_API_KEY` | `""` | YouTube Data API v3 key |
+| `users` | Accounts | `username`, `email`, `password_hash`, `role` (`user`/`admin`), `is_active` |
+| `analysis_records` | Every analysis result (single + bulk) | full signal breakdown (sentiment/emotion/tone/intent + scores), `mode`, `batch_id` |
+| `user_reports` | User-flagged mis-classifications | `text`, `model_label`, `user_note`, `status` (pending/reviewed/fixed), `reported_by` |
+| `correction_entries` | Admin-approved label corrections | `text`, `correct_label`, `model_label`, `keywords` — feeds the in-memory correction cache |
 
 ---
 
-### 5.3 Database
+## 9. API Reference (base: `/api/v1`)
 
-#### `database/connection.py`
-
-- Creates SQLAlchemy `engine` using `DATABASE_URL` from config
-- `SessionLocal` — `sessionmaker` factory (autocommit=False, autoflush=False)
-- `Base` — `declarative_base()` for all ORM models
-- `init_db()` — calls `Base.metadata.create_all(engine)`, then `_migrate_users_table()`, then `_seed_admin()`
-- `_migrate_users_table()` — adds `is_active` column to existing `users` table using `ALTER TABLE` wrapped in try/except (idempotent — safe to call on an already-migrated DB)
-- `_seed_admin()` — creates a default `admin` user (username: `admin`, password: `admin123`) if none exists
-- `get_db()` — FastAPI dependency that yields a session and closes it after the request
-
-#### `database/models.py` — ORM Models
-
-**`User`**
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | String PK | UUID |
-| `username` | String(50) unique | Login username |
-| `email` | String(120) unique nullable | Optional email |
-| `password_hash` | String(128) | bcrypt hash |
-| `role` | String(10) | `"admin"` or `"user"` |
-| `is_active` | Boolean default True | If False, user cannot log in (restricted by admin) |
-| `created_at` | DateTime | Auto UTC |
-
-**`UserReport`**
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | String PK | UUID |
-| `text` | Text | The text the user reported |
-| `model_label` | String nullable | What the model predicted |
-| `user_note` | Text nullable | User's note explaining the issue |
-| `status` | String | `pending` / `reviewed` / `fixed` |
-| `reported_by` | String FK → users.id | Reporter user ID (nullable for anon) |
-| `reporter_username` | String nullable | Reporter username snapshot |
-| `created_at` | DateTime | Auto UTC |
-| `reviewed_at` | DateTime nullable | When admin reviewed |
-
-**`CorrectionEntry`**
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | String PK | UUID |
-| `text` | Text | The corrected text |
-| `correct_label` | String | The right label: positive/negative/neutral |
-| `model_label` | String nullable | What the model had predicted |
-| `keywords` | JSON | List of signal keywords |
-| `created_at` | DateTime | Auto UTC |
-
-**`AnalysisRecord`**
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | String PK | UUID |
-| `original_text` | Text | Raw input |
-| `detected_language` | String | e.g. "Hindi" |
-| `language_code` | String | ISO code e.g. "hi" |
-| `translated_text` | Text | English translation (or original) |
-| `is_translation` | Boolean | Whether translation occurred |
-| `sentiment_label` | String | positive/negative/neutral |
-| `sentiment_confidence` | Float | 0.0–1.0 |
-| `sentiment_probabilities` | JSON | `{positive, negative, neutral}` |
-| `emotion_label` | String | Joy/Anger/etc. |
-| `emotion_confidence` | Float | |
-| `emotion_scores` | JSON | All emotion scores |
-| `tone_label` | String | professional/casual/etc. |
-| `tone_intensity` | Float | |
-| `tone_scores` | JSON | All tone scores |
-| `intent_label` | String | complaint/appreciation/etc. |
-| `intent_confidence` | Float | |
-| `intent_scores` | JSON | All intent scores |
-| `interpretation` | Text | Generated paragraph |
-| `suggested_response` | Text | Template reply |
-| `word_count` | Integer | |
-| `char_count` | Integer | |
-| `processing_time` | Float | Seconds |
-| `mode` | String | single / bulk / url |
-| `batch_id` | String nullable | Groups bulk/URL records |
-| `created_at` | DateTime | Auto UTC |
-
----
-
-### 5.4 Modules — ML Processing
-
-#### `modules/pipeline.py`
-
-**`initialize_models()`**
-Called once at startup. Instantiates singletons for all detectors so models are loaded into memory before the first request arrives.
-
-**`analyze_text(text, mode) → dict`**
-Full orchestration function:
-1. Timestamps start time
-2. Strips and validates text
-3. Calls `detect_language()`
-4. Checks `is_hinglish()` and `is_romanized_hinglish()`
-5. Calls `translate()` if non-English
-6. Runs `analyze_sentiment()` — also sets `from_correction = True` if the result came from the correction cache
-7. Runs `detect_sarcasm()` — flips positive→negative **only if `not from_correction`** (prevents sarcasm from overriding admin-corrected labels)
-8. Runs `detect_emotion()` then aligns emotion with sentiment polarity
-9. Runs `detect_tone()`
-10. Runs `detect_intent()`
-11. Calls `generate_interpretation()`
-12. Calls `generate_response()`
-13. Returns assembled result dict
-
----
-
-#### `modules/sentiment.py` — `BERTLogisticSentimentAnalyzer`
-
-Singleton class using thread-safe double-check locking.
-
-**Models loaded:**
-- `distilbert-base-multilingual-cased` — generates 768-dim text embeddings
-- `cardiffnlp/twitter-roberta-base-sentiment-latest` — 3-class sentiment pipeline
-- A `LogisticRegression` classifier trained on seed examples
-
-**`_correction_cache`** — in-memory dict mapping `text → correct_label`. Populated at startup from DB and updated when admin fixes a report.
-
-**`analyze(text) → {label, confidence, probabilities}`**
-1. **Correction cache check first**: if `text` (or `text.strip()`) exists in `_correction_cache`, return that label immediately with `confidence=1.0` — skips all ML inference
-2. Tokenize → DistilBERT embedding → mean-pool
-3. LR predicts probabilities (`lr_probs`)
-4. RoBERTa pipeline predicts probabilities (`roberta_probs`)
-5. Ensemble: `0.35 * lr_probs + 0.65 * roberta_probs`
-6. Emoji signal adjustment
-7. Normalize
-8. If max confidence < 0.55 → return neutral
-9. Negative margin guard → return neutral if ambiguous
-10. Return winner label
-
-**`apply_single_correction(text, label, keywords)`** — adds to `_correction_cache` immediately without waiting for retrain.
-
-**`retrain_with_corrections(entries)`** — rebuilds `_correction_cache` from a list of `CorrectionEntry` objects (called at startup to restore persisted corrections).
-
----
-
-#### `modules/emotion.py` — `EmotionDetector`
-
-Singleton, loads `j-hartmann/emotion-english-distilroberta-base`.
-
-**`detect_emotion(text) → {label, confidence, scores}`**
-- Runs HuggingFace pipeline top-k classification
-- Maps 28 GoEmotions labels to 8 display labels
-- Falls back to `{Neutral, 0.5}` on error
-
----
-
-#### `modules/tone.py` — `ToneDetector`
-
-Singleton, loads `typeform/distilbert-base-uncased-mnli`.
-
-**`detect_tone(text) → {label, intensity, scores}`**
-- Zero-shot NLI with 8 candidate labels: `professional, casual, sarcastic, aggressive, critical, appreciative, formal, informal`
-
----
-
-#### `modules/intent.py` — `IntentDetector`
-
-Singleton, loads `typeform/distilbert-base-uncased-mnli`.
-
-**`detect_intent(text) → {label, confidence, scores}`**
-- Zero-shot NLI with 8 labels: `complaint, appreciation, inquiry, request, suggestion, feedback, threat, praise`
-
----
-
-#### `modules/sarcasm.py` — `SarcasmDetector`
-
-Singleton, loads `cardiffnlp/twitter-roberta-base-irony`.
-
-**`detect_sarcasm(text) → {detected, confidence}`**
-- Binary: irony vs non-irony
-- `detected=True` only if irony score ≥ 0.70
-
----
-
-#### `modules/language_detector.py`
-
-**`detect_language(text)`**, **`is_hinglish(text)`**, **`is_romanized_hinglish(text)`** — same as before.
-
----
-
-#### `modules/translation.py`
-
-**`translate(text, source_lang_code) → (translated_text, was_translated)`**
-
-MarianMT-based translation. Caches loaded model pairs.
-
----
-
-#### `modules/interpretation.py`
-
-**`generate_interpretation(...) → str`** — rule-based paragraph generator combining all analysis dimensions.
-
----
-
-#### `modules/response_generator.py`
-
-**`generate_response(sentiment, intent, tone) → str`** — cascading template lookup.
-
----
-
-#### `modules/analytics.py`
-
-**`get_analytics(db, limit=1000) → dict`** — computes distributions, trends, top words, AI insight from DB records.
-
----
-
-#### `modules/pdf_generator.py`
-
-Three functions: `generate_url_analysis_pdf`, `generate_single_analysis_pdf`, `generate_bulk_analysis_pdf` — all return bytes.
-
----
-
-#### `modules/url_fetcher.py`
-
-**`detect_platform(url)`** — returns `'youtube'` or `'myntra'`; raises `ValueError` for unsupported URLs. Instagram support was removed.
-
-**`fetch_youtube_comments(url, max_comments)`** — fetches YouTube comments via the YouTube Data API v3. Requires `YOUTUBE_API_KEY` in `.env`.
-
-**`fetch_myntra_reviews(url, max_reviews)`** — fetches Myntra product reviews using `curl_cffi` with Chrome 120 TLS impersonation:
-1. Extracts the numeric product ID from the URL path (regex `\d{6,10}`)
-2. Loads the product page to establish session cookies (used by Myntra's CDN and anti-bot layer)
-3. Parses the `<title>` tag for the product name
-4. Calls Myntra's internal proxy endpoint `/web/v1/reviews/product/{id}?size=10&page={n}` in a loop, extracting text from the `review` field of each result object
-5. Stops when fewer than `size` results are returned (last page) or `max_reviews` is reached
-6. Returns total count from `reviewsMetaData.reviewCount`
-7. Falls back gracefully — raises `ValueError` with a user-friendly message if no reviews are found
-
-**`fetch_comments(url, max_comments)`** — dispatcher: routes `youtube` URLs to `fetch_youtube_comments`, `myntra` URLs to `fetch_myntra_reviews`.
-
----
-
-### 5.5 Routers — API Endpoints
-
-#### `routers/auth.py`
-
-**`POST /api/v1/auth/register`**
-- Creates a new user with bcrypt-hashed password, role=`user`
-- Returns `{access_token, user}`
-
-**`POST /api/v1/auth/login`**
-- Verifies username + password
-- Checks `is_active` — raises HTTP 403 if user is restricted: `"Your account has been restricted. Contact an administrator."`
-- Returns JWT token + user object
-
-**`GET /api/v1/auth/me`**
-- Returns current user from JWT (via `get_current_user` dependency)
-
----
-
-#### `routers/corrections.py`
-
-CRUD for correction entries + model retraining. **Admin-only.**
-
-| Endpoint | Description |
-|---|---|
-| `POST /corrections` | Add a correction entry |
-| `GET /corrections` | List corrections (limit param) |
-| `GET /corrections/stats` | Stats: total, breakdown, top keywords |
-| `POST /corrections/retrain` | Retrain model from all DB corrections |
-| `DELETE /corrections/{id}` | Delete one correction |
-| `GET /corrections/online-status` | Whether online dataset is loaded |
-| `POST /corrections/fetch-online` | Fetch online training data |
-
----
-
-#### `routers/reports.py`
-
-**`POST /api/v1/reports`** — User submits a wrong prediction report.
-Stores `UserReport` with status=`pending`.
-
-**`GET /api/v1/reports`** — Admin lists reports (optional `status` filter).
-
-**`GET /api/v1/reports/stats`** — Admin: `{total, pending, reviewed, fixed}` counts.
-
-**`PATCH /api/v1/reports/{id}`** — Admin reviews a report.
-- If `status=fixed` and `correct_label` provided:
-  1. Creates `CorrectionEntry` in DB
-  2. Updates all matching `AnalysisRecord` rows in DB with the corrected label (so History page is immediately correct)
-  3. Calls `get_sentiment_analyzer().apply_single_correction(text, label, keywords)` to update in-memory cache
-- Returns updated `UserReport`
-
-**`DELETE /api/v1/reports/{id}`** — Admin deletes a report.
-
----
-
-#### `routers/admin.py`
-
-All endpoints require `require_admin` dependency.
-
-**`GET /api/v1/admin/stats`**
-Returns:
-```json
-{
-  "users": {
-    "total": 5,
-    "admins": 1,
-    "regular_users": 4,
-    "list": [
-      {"id", "username", "email", "role", "is_active", "created_at"}
-    ]
-  },
-  "storage": {
-    "db_size_bytes", "db_size_mb", "limit_mb": 500,
-    "usage_pct", "analysis_records", "correction_entries",
-    "user_reports", "total_records"
-  }
-}
-```
-
-**`PATCH /api/v1/admin/users/{user_id}/restrict`**
-- Toggles `user.is_active` (True ↔ False)
-- Prevents self-restriction (returns 400)
-- Returns `{id, username, is_active}`
-
-**`DELETE /api/v1/admin/users/{user_id}`**
-- Deletes the user from DB
-- Prevents self-deletion (returns 400)
-- Returns `{deleted: username}`
-
-**`DELETE /api/v1/admin/clear-analysis`**
-- Deletes all `AnalysisRecord` rows
-- Returns `{deleted, message}`
-
-**`DELETE /api/v1/admin/clear-all`**
-- Deletes all `AnalysisRecord`, `CorrectionEntry`, `UserReport` rows
-- Returns `{deleted, analysis, corrections, reports}`
-
----
-
-#### `routers/analysis.py`
-
-**`POST /api/v1/analyze`** — Single text analysis. Saves record via BackgroundTask.
-
----
-
-#### `routers/bulk.py`
-
-**`POST /api/v1/bulk-analyze`** — Bulk analysis, up to 100 texts.
-**`POST /api/v1/upload-csv`** — CSV text extraction, up to 500 rows.
-
----
-
-#### `routers/history.py`
-
-**`GET /api/v1/history`** — Paginated + filtered history.
-**`GET /api/v1/history/{id}`** — Single record.
-**`DELETE /api/v1/history/{id}`** — Delete one.
-**`DELETE /api/v1/history`** — Clear all.
-
----
-
-#### `routers/analytics.py`
-
-**`GET /api/v1/analytics`** — Dashboard data.
-
----
-
-#### `routers/url_analysis.py`
-
-**`POST /api/v1/analyze-url`** — YouTube or Myntra analysis. Accepts `{url, max_comments}`. Calls `fetch_comments()` which auto-detects platform, then passes the returned text list through the standard sentiment pipeline, aggregates results, and returns `URLAnalysisResponse`.
-
----
-
-#### `routers/export.py`
-
-**`POST /api/v1/export-pdf`** / **`/single`** / **`/bulk`** — PDF downloads.
-
----
-
-### 5.6 Schemas — Validation
-
-#### `schemas/analysis.py`
-
-```
-SentimentResult, SarcasmResult, EmotionResult, ToneResult, IntentResult
-AnalysisRequest, BulkAnalysisRequest
-SingleAnalysisResponse, BulkAnalysisItem, BulkAnalysisResponse
-AnalyticsResponse
-```
-
-#### `schemas/url_analysis.py`
-
-```
-URLAnalysisRequest, PostMetadata, URLAnalysisResponse
-```
-
-#### `schemas/auth.py`
-
-```
-RegisterRequest   {username, password, email?}
-LoginRequest      {username, password}
-UserOut           {id, username, email, role, created_at}
-TokenResponse     {access_token, token_type, user: UserOut}
-```
-
-#### `schemas/reports.py`
-
-```
-ReportCreate      {text, model_label?, user_note?}
-ReportResponse    {id, text, model_label, user_note, status, reporter_username, created_at, reviewed_at}
-ReportReview      {status, correct_label?, keywords?}
-```
-
----
-
-### 5.7 Auth — Authentication
-
-#### `auth/deps.py`
-
-- `hash_password(password)` — bcrypt via passlib
-- `verify_password(plain, hashed)` — passlib verify
-- `create_access_token(user_id, username, role)` — python-jose JWT, signed with `SECRET_KEY`, expires in `ACCESS_TOKEN_EXPIRE_MINUTES`
-- `get_current_user(token)` — FastAPI dependency: decodes JWT, queries DB for user
-- `get_optional_user(token)` — same but returns `None` instead of raising 401 (used for anonymous-friendly endpoints)
-- `require_admin(current_user)` — FastAPI dependency: raises 403 if `user.role != "admin"`
-
----
-
-## 6. Frontend — File by File
-
-### 6.1 Entry & Routing
-
-#### `src/main.tsx`
-
-- `ReactDOM.createRoot(...).render(...)` in `React.StrictMode`
-- Mounts `<Toaster>` globally (React Hot Toast, dark theme)
-
-#### `src/App.tsx`
-
-- Sets up `<BrowserRouter>` with `<Routes>`
-- **`ThemeApplier`** component: reads `themeId` from Zustand, calls `applyTheme()` on mount and on change
-- **`ClearAuthOnStartup`** component: calls `logoutUser()` once on mount — clears `token` and `user` from both the Zustand store and `localStorage` on every page load, ensuring the login page is always shown first regardless of any previously stored session
-- **`RequireAuth` guard**: redirects to `/login` if `token` is null
-- **`RequireAdmin` guard**: redirects to `/dashboard` if `user.role !== 'admin'`
-- Route map:
-
-| Path | Component | Guard |
-|---|---|---|
-| `/` | redirect → `/login` | — |
-| `/login` | `Login` | — |
-| `/register` | `Register` | — |
-| `/dashboard` | `Dashboard` | Auth required |
-| `/analyze` | `SingleAnalysis` | Auth required |
-| `/bulk` | `BulkAnalysis` | Auth required |
-| `/url` | `URLAnalysis` | Auth required |
-| `/history` | `History` | Auth required |
-| `/settings` | `Settings` | Auth required |
-| `/training-data` | `TrainingData` | `RequireAdmin` |
-| `/user-reports` | `UserReports` | `RequireAdmin` |
-| `/admin` | `AdminOverview` | `RequireAdmin` |
-
-All non-auth routes wrapped in `<Layout>`.
-
----
-
-### 6.2 Pages
-
-#### `pages/Login.tsx`
-
-- Username + password form
-- Calls `loginUser(username, password)`
-- On success: stores JWT in `localStorage`, sets `user` in Zustand store, redirects to `/dashboard`
-- Shows toast on error (including "account restricted" 403 message)
-
-#### `pages/Register.tsx`
-
-- Username, password, optional email form
-- Calls `registerUser(username, password, email)`
-- On success: same token/user storage as login
-
----
-
-#### `pages/Dashboard.tsx`
-
-Fetches analytics on mount. Renders:
-
-- **Header**: Title (gradient text) — no refresh button in header
-- **KPI Row** (6 cards): Total Analyzed, Dominant Sentiment, Dominant Emotion, Dominant Tone, Dominant Intent, Avg Confidence — each shows the dominant label value + a percentage metric ("X% of total") underneath
-- **Charts row 1** (3 columns):
-  - `PieChart`: Sentiment distribution
-  - `BarChart`: Top 6 emotions (vertical bars)
-  - `PieChart`: Language distribution — shows top 5 languages + an "Others" bucket for the remainder; uses a custom flex-wrap legend below the donut instead of the default Recharts legend (prevents overflow with many language codes)
-- **Charts row 2** (2 columns):
-  - Horizontal `BarChart` (`layout="vertical"`): Tone breakdown (all 8 tones)
-  - Horizontal `BarChart` (`layout="vertical"`): Intent breakdown (all 8 intents)
-- **Line Chart**: Sentiment trend over last 30 days (3 lines: positive/negative/neutral + total volume line)
-- **Word Cloud**: Top 50 words
-- **Recent Activity**: Last 10 analyses
-- **AI Insight**: Generated summary paragraph
-
-Loading: all sections show `<Skeleton>` placeholders. TOOLTIP_STYLE constant for consistent Recharts tooltips.
-
----
-
-#### `pages/SingleAnalysis.tsx`
-
-- **Input**: `<Textarea>` with 5000 char limit + 6 example chips
-- **Result section**:
-  - `<LanguageCard>`, `<SentimentCard>`, `<EmotionCard>`, `<ToneCard>`, `<IntentCard>`, `<InterpretationCard>`, `<ResponseCard>`
-  - Export PDF button
-  - *(Processing Time / Word Count / Characters stats row removed)*
-
----
-
-#### `pages/BulkAnalysis.tsx`
-
-Two tabs: Text Input and CSV Upload. Results panel: KPIs, distributions, paginated table (15/page) with search + sentiment filter, Export PDF button.
-
----
-
-#### `pages/URLAnalysis.tsx`
-
-URL input with platform auto-detection badge (YouTube → red, Myntra → fuchsia). Max comments/reviews slider. Platform tip cards shown when the input is empty.
-
-Results panel:
-- Post/product metadata card (platform badge, title, author, comment count, Export PDF button)
-- KPI row: Comments Analysed, Dominant Sentiment, Dominant Emotion, Avg Confidence
-- Sentiment Distribution + Top Emotions bar charts
-- Most Positive / Most Negative highlighted comment cards
-- Paginated comments table (15/page) with search + sentiment filter
-- Each comment row is expandable — expanded view shows Emotion, Tone, Intent, Confidence mini-cards, interpretation, and a **Report Issue** button (red flag icon) that opens `ReportModal` pre-filled with that comment's text and predicted sentiment label
-
-Platforms supported: **YouTube** (via YouTube Data API v3) and **Myntra** (via internal reviews API). Instagram support was removed.
-
----
-
-#### `pages/History.tsx`
-
-Paginated history browser (20/page). Filter bar: text search + sentiment dropdown. Expandable rows with full analysis details. Clear All button. *(Processing time badge removed from each row)*
-
----
-
-#### `pages/Settings.tsx`
-
-API config, model info, theme selector (6 themes), animation toggle, About section.
-
----
-
-#### `pages/AdminOverview.tsx`
-
-**Admin-only.** Full user management and storage control panel.
-
-**KPI Row** (4 cards): Total Users, Admins, Regular Users, Analysis Records.
-
-**Storage Card**:
-- Animated gauge bar (green <60%, amber 60–85%, red ≥85%) against a 500 MB soft cap
-- Breakdown: DB file size, analysis records, correction entries, user reports
-- **Clear Analysis Data** button (clears `AnalysisRecord` table)
-- **Clear All Data** button (clears analyses + corrections + reports)
-- Both have a two-step confirmation dialog before executing
-
-**Registered Users Card**:
-- **Search input** — filters user list by username in real-time (with clear ✕ button)
-- Shows count "N shown" in header
-- Per-user row:
-  - Avatar icon (ShieldCheck for admin, UserIcon for user)
-  - Username + "(you)" label for the current logged-in admin
-  - Email + creation date
-  - **"Restricted" badge** (red) if `is_active=false`
-  - Role badge (indigo for admin, grey for user)
-  - **Restrict/Unrestrict button** (Ban icon when active, Unlock icon when restricted) — toggles `is_active` via `PATCH /admin/users/:id/restrict`; updates list optimistically without full reload
-  - **Delete button** (UserX icon) — clicking shows inline "Delete? ✓ ✗" confirmation; confirming calls `DELETE /admin/users/:id` and removes user from list
-  - Restricted rows are visually dimmed (opacity-60) with a red-tinted border
-  - Action buttons are hidden for the current admin user (self-protection)
-
----
-
-#### `pages/UserReports.tsx`
-
-**Admin-only.** Lists user-submitted wrong prediction reports. Admin can mark as reviewed or fixed (with correct label input). Fixing a report auto-creates a correction entry, updates all matching history records, and updates the in-memory correction cache.
-
----
-
-#### `pages/TrainingData.tsx`
-
-**Admin-only.** Lists all correction entries. Admin can retrain the model, delete individual corrections, view stats.
-
----
-
-### 6.3 Analysis Component Cards
-
-| Component | Displays |
-|---|---|
-| `SentimentCard` | Label badge, confidence, probability bars — *Correct button removed (admin-only feature via UserReports)* |
-| `EmotionCard` | Emotion label + icon, confidence, score bars for 8 emotions |
-| `ToneCard` | Tone label, intensity bar, score bars for 8 tones |
-| `IntentCard` | Intent label, confidence, score bars for 8 intents |
-| `LanguageCard` | Language + badge, code, original/translated text preview |
-| `InterpretationCard` | Full interpretation paragraph |
-| `ResponseCard` | Suggested response text |
-
----
-
-### 6.4 UI Primitives
-
-All in `src/components/ui/`.
-
-| Component | Props / Behaviour |
-|---|---|
-| `Card` | `className?` — consistent rounded border box |
-| `Button` | `variant` (primary/outline/ghost/danger), `size`, `loading`, `icon`, `disabled` |
-| `Input` | `label?`, `icon?`, `error?`, character count |
-| `Textarea` | `label?`, `maxLength`, counter, resizable |
-| `Select` | `label?`, `options[]`, controlled |
-| `Badge` | `variant` (primary/default/positive/negative/neutral/danger) |
-| `Progress` | `value` (0–1), `label?`, `color?` |
-| `Skeleton` | Animated gray placeholder box |
-| `Toast` | React Hot Toast configured with dark theme |
-
----
-
-### 6.5 Layout Components
-
-#### `components/Layout.tsx`
-
-Renders `<Sidebar>` + `<Outlet>`. No sticky status bar or correction panel.
-
-#### `components/Sidebar.tsx`
-
-- Logo + navigation items with Lucide icons
-- **Admin Overview** nav item (ShieldCheck icon, `/admin` route) — visible only when `user.role === 'admin'`
-- Collapse toggle (icons only vs icons + labels)
-- **Backend health widget** at the bottom (replaces the old static "AI Powered" badge):
-  - Polls `GET /health` every 30 seconds + on mount
-  - Shows green "Backend Connected" / red "Backend Offline" with Wifi/WifiOff icon
-  - Refresh button (RefreshCw) to manually re-check
-  - Icons are vertically aligned with `translate-y-px`
-
-#### `components/BackendStatus.tsx`
-
-Standalone health indicator component used inside the Sidebar. Accepts `status` and `loading` props, renders the Wifi/WifiOff icon + label + refresh button.
-
----
-
-### 6.6 State & API Layer
-
-#### `store/index.ts` — Zustand Store
-
-```ts
-{
-  // Auth
-  user: User | null
-  token: string | null           // persisted to localStorage (key: sentimentiq_token)
-
-  // Analysis results
-  lastAnalysis: SingleAnalysisResponse | null
-  lastBulkAnalysis: BulkAnalysisResponse | null
-  lastURLAnalysis: URLAnalysisResponse | null
-  analytics: AnalyticsData | null
-
-  // UI state
-  isAnalyzing: boolean
-  isBulkAnalyzing: boolean
-  isURLAnalyzing: boolean
-  sidebarCollapsed: boolean
-  themeId: string               // persisted to localStorage
-}
-```
-
-Actions: `setUser`, `setToken`, `logout`, `set*` for analysis state, `toggleSidebar`, `setThemeId`.
-
-#### `lib/api.ts` — Axios Client
-
-Base URL: `VITE_API_URL` or `http://localhost:8000/api/v1`
-Timeout: 120 seconds
-Auth: request interceptor adds `Authorization: Bearer <token>` from `localStorage`
-
-Response interceptor extracts `error.response.data.detail` for user-friendly messages. Handles blob responses (PDF) correctly.
-
-| Function | Method | Endpoint |
-|---|---|---|
-| `analyzeText(text)` | POST | `/analyze` |
-| `bulkAnalyze(texts[])` | POST | `/bulk-analyze` |
-| `uploadCSV(file)` | POST | `/upload-csv` |
-| `getAnalytics()` | GET | `/analytics` |
-| `getHistory(params)` | GET | `/history` |
-| `deleteHistoryRecord(id)` | DELETE | `/history/{id}` |
-| `clearHistory()` | DELETE | `/history` |
-| `analyzeURL(url, n)` | POST | `/analyze-url` |
-| `exportURLAnalysisPDF(data)` | POST | `/export-pdf` |
-| `exportSingleAnalysisPDF(data)` | POST | `/export-pdf/single` |
-| `exportBulkAnalysisPDF(data)` | POST | `/export-pdf/bulk` |
-| `checkHealth()` | GET | `/health` (base URL, not `/api/v1`) |
-| `loginUser(username, password)` | POST | `/auth/login` |
-| `registerUser(username, password, email?)` | POST | `/auth/register` |
-| `getCurrentUser()` | GET | `/auth/me` |
-| `submitReport(payload)` | POST | `/reports` |
-| `getReports(status?, limit)` | GET | `/reports` |
-| `getReportStats()` | GET | `/reports/stats` |
-| `reviewReport(id, payload)` | PATCH | `/reports/{id}` |
-| `deleteReport(id)` | DELETE | `/reports/{id}` |
-| `addCorrection(data)` | POST | `/corrections` |
-| `getCorrections(limit)` | GET | `/corrections` |
-| `getCorrectionStats()` | GET | `/corrections/stats` |
-| `retrainModel()` | POST | `/corrections/retrain` |
-| `deleteCorrection(id)` | DELETE | `/corrections/{id}` |
-| `getAdminStats()` | GET | `/admin/stats` |
-| `clearAnalysisRecords()` | DELETE | `/admin/clear-analysis` |
-| `clearAllData()` | DELETE | `/admin/clear-all` |
-| `restrictUser(userId)` | PATCH | `/admin/users/{id}/restrict` |
-| `deleteUser(userId)` | DELETE | `/admin/users/{id}` |
-
----
-
-### 6.7 Utilities & Themes
-
-#### `lib/utils.ts`
-
-| Function | Returns |
-|---|---|
-| `getSentimentColor(label)` | RGB string for charts |
-| `getSentimentBg(label)` | Tailwind bg class |
-| `getSentimentTextColor(label)` | Tailwind text class |
-| `getEmotionColor(label)` | Hex color for emotion |
-| `capitalize(text)` | First-letter uppercase |
-| `truncateText(text, limit)` | `...` truncation |
-| `formatDate(iso)` | Relative: "2 hours ago" |
-| `formatConfidence(val)` | `"87.4%"` |
-| `cn(...classes)` | `clsx` + `tailwind-merge` |
-
-#### `lib/themes.ts`
-
-6 theme definitions: `dark`, `indigo`, `violet`, `rose`, `green`, `amber`.
-`applyTheme(theme)` sets CSS variables on `document.documentElement`.
-
----
-
-### 6.8 Types
-
-#### `types/index.ts`
-
-```ts
-// Auth
-User                { id, username, email, role: 'admin'|'user', created_at }
-
-// Analysis
-SentimentResult, SarcasmResult, EmotionResult, ToneResult, IntentResult
-SingleAnalysisResponse
-BulkAnalysisItem, BulkAnalysisResponse
-PostMetadata        { platform: 'youtube' | 'myntra', title, author, url, fetched_comments, total_available }
-URLAnalysisResponse
-AnalyticsData       { trend_data[], top_words[], recent_reviews[], ... }
-HistoryRecord
-
-// Reports
-UserReport          { id, text, model_label, user_note, status, reporter_username, created_at, reviewed_at }
-ReportStats         { total, pending, reviewed, fixed }
-
-// Corrections
-CorrectionEntry     { id, text, correct_label, model_label, keywords[], created_at }
-CorrectionStats     { total, retrain_threshold, needs_retrain, label_breakdown, top_keywords[], last_retrain }
-
-// Admin
-AdminUserEntry      { id, username, email, role, is_active, created_at }
-AdminStats          { users: { total, admins, regular_users, list: AdminUserEntry[] }, storage: { ... } }
-```
-
----
-
-## 7. ML Models Reference
-
-| Task | Model ID | Type | Labels / Output |
+| Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| Sentiment (embedding) | `distilbert-base-multilingual-cased` | Feature extractor | 768-dim embedding |
-| Sentiment (classification) | `cardiffnlp/twitter-roberta-base-sentiment-latest` | 3-class | positive / negative / neutral |
-| Sentiment (ensemble) | Logistic Regression (in-memory) | 3-class | Trained on seed + corrections |
-| Emotion | `j-hartmann/emotion-english-distilroberta-base` | 28-class | Joy / Anger / Disgust / Disappointment / Frustration / Excitement / Appreciation / Neutral |
-| Tone | `typeform/distilbert-base-uncased-mnli` | Zero-shot NLI | professional / casual / sarcastic / aggressive / critical / appreciative / formal / informal |
-| Intent | `typeform/distilbert-base-uncased-mnli` | Zero-shot NLI | complaint / appreciation / inquiry / request / suggestion / feedback / threat / praise |
-| Sarcasm | `cardiffnlp/twitter-roberta-base-irony` | Binary | irony / non-irony (threshold 0.70) |
-| Language | `langdetect` | Statistical n-gram | ISO 639-1 code |
-| Translation | `Helsinki-NLP/opus-mt-{src}-en` | Seq2Seq (MarianMT) | English text |
+| POST | `/auth/register` | — | Create account, returns JWT |
+| POST | `/auth/login` | — | Returns JWT (403 if `is_active=false`) |
+| GET | `/auth/me` | user | Current user profile |
+| POST | `/analyze` | user | Single text analysis |
+| POST | `/bulk-analyze` | user | Up to 100 texts |
+| POST | `/upload-csv` | user | Parse CSV → extract text column |
+| POST | `/analyze-url` | user | YouTube/Myntra comment/review scrape + analyze |
+| GET | `/analytics` | user | Dashboard KPIs, trends, keyword cloud |
+| GET/DELETE | `/history`, `/history/{id}` | user | Paginated history, delete record(s) |
+| POST | `/export/pdf/{single,bulk,url}` | user | Branded PDF report |
+| POST | `/reports` | optional | Submit a mis-classification report |
+| GET/PATCH/DELETE | `/reports*` | admin | Review, resolve, delete reports |
+| GET/POST/DELETE | `/corrections*` | admin | Manage correction entries |
+| POST | `/corrections/retrain` | admin | Rebuild LR head from corrections |
+| POST | `/corrections/fetch-online` | admin | Pull additional labeled seed data |
+| GET | `/admin/stats` | admin | User counts, storage gauge, record counts |
+| PATCH | `/admin/users/{id}/restrict` | admin | Toggle account active/restricted |
+| DELETE | `/admin/users/{id}` | admin | Delete a user |
+| DELETE | `/admin/clear-analysis`, `/admin/clear-all` | admin | Wipe stored data |
+| GET | `/health` | — | Health check |
 
 ---
 
-## 8. API Endpoints Reference
-
-Base URL: `http://localhost:8000/api/v1`
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/health` | — | Backend health check |
-| GET | `/` | — | Version info |
-| POST | `/auth/register` | — | Register new user |
-| POST | `/auth/login` | — | Login, get JWT |
-| GET | `/auth/me` | User | Current user info |
-| POST | `/analyze` | User | Single text analysis |
-| POST | `/bulk-analyze` | User | Bulk analysis (≤100 texts) |
-| POST | `/upload-csv` | User | CSV text extraction |
-| GET | `/analytics` | User | Dashboard analytics data |
-| GET | `/history` | User | Paginated history with filters |
-| GET | `/history/{id}` | User | Single history record |
-| DELETE | `/history/{id}` | User | Delete one record |
-| DELETE | `/history` | User | Clear all records |
-| POST | `/analyze-url` | User | YouTube or Myntra review analysis |
-| POST | `/export-pdf` | User | Export URL analysis PDF |
-| POST | `/export-pdf/single` | User | Export single analysis PDF |
-| POST | `/export-pdf/bulk` | User | Export bulk analysis PDF |
-| POST | `/reports` | User | Submit wrong prediction report |
-| GET | `/reports` | Admin | List reports |
-| GET | `/reports/stats` | Admin | Report counts by status |
-| PATCH | `/reports/{id}` | Admin | Review / fix a report |
-| DELETE | `/reports/{id}` | Admin | Delete a report |
-| POST | `/corrections` | Admin | Add correction entry |
-| GET | `/corrections` | Admin | List corrections |
-| GET | `/corrections/stats` | Admin | Correction stats |
-| POST | `/corrections/retrain` | Admin | Retrain model |
-| DELETE | `/corrections/{id}` | Admin | Delete correction |
-| GET | `/admin/stats` | Admin | User counts + storage stats |
-| PATCH | `/admin/users/{id}/restrict` | Admin | Toggle user is_active |
-| DELETE | `/admin/users/{id}` | Admin | Delete user |
-| DELETE | `/admin/clear-analysis` | Admin | Clear all analysis records |
-| DELETE | `/admin/clear-all` | Admin | Clear analyses + corrections + reports |
-
----
-
-## 9. Data Flow Walkthroughs
-
-### Single Text Analysis
+## 10. Environment / Config (`backend/config.py`, `.env`)
 
 ```
-User types text → clicks "Analyze"
-        │
-        ▼
-SingleAnalysis.tsx
-  analyzeText(text)               ← lib/api.ts → POST /analyze
-        │
-        ▼
-routers/analysis.py
-  validate (len, not empty)
-  analyze_text(text, "single")    ← modules/pipeline.py
-        │
-        ▼  [correction cache check → ML pipeline]
-        │
-        ▼
-  BackgroundTask: save AnalysisRecord to DB
-  return SingleAnalysisResponse
-        │
-        ▼
-SingleAnalysis.tsx renders result cards
-```
-
----
-
-### Admin Fixes a Wrong Prediction
-
-```
-User submits report via UI
-        │
-        ▼
-POST /reports → UserReport{status: "pending"} saved in DB
-        │
-        ▼
-Admin opens UserReports page → sees pending report
-Admin selects correct label → clicks "Fix"
-        │
-        ▼
-PATCH /reports/{id}  {status: "fixed", correct_label: "negative"}
-        │
-        ▼
-routers/reports.py:
-  1. Creates CorrectionEntry in DB
-  2. Queries all AnalysisRecord WHERE original_text == report.text
-     → updates sentiment_label, confidence, probabilities for each
-  3. Calls analyzer.apply_single_correction(text, label, keywords)
-     → adds to _correction_cache immediately
-        │
-        ▼
-Next time user analyzes same text:
-  pipeline.py calls analyze_text()
-    → sentiment.py checks _correction_cache first
-    → returns corrected label with confidence=1.0
-    → sarcasm override skipped (from_correction=True)
-        │
-        ▼
-Correct result returned — no ML inference needed
-History page also shows correct label (DB was updated)
-```
-
----
-
-### Admin Restricts a User
-
-```
-Admin opens Admin Overview → sees user list
-Admin clicks Ban icon on a user row
-        │
-        ▼
-PATCH /admin/users/{id}/restrict
-  → toggles user.is_active in DB
-  → returns {id, username, is_active: false}
-        │
-        ▼
-Frontend updates user row optimistically:
-  - is_active=false → row dims, red "Restricted" badge appears
-  - Ban icon changes to Unlock icon
-        │
-        ▼
-Next time that user attempts to login:
-POST /auth/login
-  → checks is_active → raises HTTP 403
-  → "Your account has been restricted. Contact an administrator."
-```
-
----
-
-### Correction Cache Persistence Across Restarts
-
-```
-Server restarts
-        │
-        ▼
-main.py lifespan startup:
-  1. init_db() → create/migrate tables
-  2. initialize_models() → load ML models
-  3. Query all CorrectionEntry rows from DB
-     → call retrain_with_corrections(entries)
-     → rebuilds _correction_cache dict from DB
-        │
-        ▼
-All previously admin-approved corrections are live again
-without needing to retrain or re-submit anything
-```
-
----
-
-### Dashboard Load
-
-```
-Dashboard.tsx mounts
-        │
-        └── getAnalytics()        ← GET /analytics
-              │
-              ▼
-        modules/analytics.py
-          query last 1000 records
-          Counter distributions (sentiment, emotion, tone, intent, language)
-          trend data (30 days)
-          top 50 words
-          recent 10 reviews
-          AI insight sentence
-          return AnalyticsData
-              │
-              ▼
-        Dashboard.tsx renders:
-          KPI cards with % metrics
-          Sentiment PieChart
-          Emotion BarChart
-          Language PieChart
-          Tone horizontal BarChart
-          Intent horizontal BarChart
-          Trend LineChart (with total volume)
-          Word cloud, recent activity, AI insight
-```
-
----
-
-## 10. Database Schema
-
-```sql
-CREATE TABLE users (
-    id              TEXT PRIMARY KEY,
-    username        TEXT NOT NULL UNIQUE,
-    email           TEXT UNIQUE,
-    password_hash   TEXT NOT NULL,
-    role            TEXT NOT NULL DEFAULT 'user',    -- 'admin' or 'user'
-    is_active       INTEGER NOT NULL DEFAULT 1,      -- 0 = restricted, 1 = active
-    created_at      DATETIME DEFAULT (datetime('now'))
-);
-
-CREATE TABLE user_reports (
-    id                  TEXT PRIMARY KEY,
-    text                TEXT NOT NULL,
-    model_label         TEXT,
-    user_note           TEXT,
-    status              TEXT NOT NULL DEFAULT 'pending',  -- pending/reviewed/fixed
-    reported_by         TEXT REFERENCES users(id),
-    reporter_username   TEXT,
-    created_at          DATETIME DEFAULT (datetime('now')),
-    reviewed_at         DATETIME
-);
-
-CREATE TABLE correction_entries (
-    id              TEXT PRIMARY KEY,
-    text            TEXT NOT NULL,
-    correct_label   TEXT NOT NULL,
-    model_label     TEXT,
-    keywords        TEXT,   -- JSON array
-    created_at      DATETIME DEFAULT (datetime('now'))
-);
-
-CREATE TABLE analysis_records (
-    id                      TEXT PRIMARY KEY,
-    original_text           TEXT NOT NULL,
-    detected_language       TEXT,
-    language_code           TEXT,
-    translated_text         TEXT,
-    is_translation          BOOLEAN,
-    sentiment_label         TEXT,
-    sentiment_confidence    REAL,
-    sentiment_probabilities TEXT,   -- JSON
-    emotion_label           TEXT,
-    emotion_confidence      REAL,
-    emotion_scores          TEXT,   -- JSON
-    tone_label              TEXT,
-    tone_intensity          REAL,
-    tone_scores             TEXT,   -- JSON
-    intent_label            TEXT,
-    intent_confidence       REAL,
-    intent_scores           TEXT,   -- JSON
-    interpretation          TEXT,
-    suggested_response      TEXT,
-    word_count              INTEGER,
-    char_count              INTEGER,
-    processing_time         REAL,
-    mode                    TEXT,   -- single | bulk | url
-    batch_id                TEXT,
-    created_at              DATETIME DEFAULT (datetime('now'))
-);
-```
-
-> **Migration note**: `is_active` was added to the `users` table after initial deployment. `_migrate_users_table()` in `connection.py` handles this with `ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1` wrapped in try/except, making it safe to run on both new and existing databases.
-
----
-
-## 11. Environment Variables
-
-### Backend (`backend/.env`)
-
-```env
 DATABASE_URL=sqlite:///./sentiment_platform.db
 MODEL_CACHE_DIR=./model_cache
-DEVICE=auto
-MAX_TEXT_LENGTH=512
-CORS_ORIGINS=["http://localhost:5173","http://localhost:3000"]
-LOG_LEVEL=INFO
-SECRET_KEY=change-me-in-production
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
-YOUTUBE_API_KEY=<your-key>
-# No additional credentials required for Myntra — curl_cffi impersonates Chrome 120
+DEVICE=auto              # auto | cuda | cpu
+JWT_SECRET=<change in production>
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_DAYS=7
+CORS_ORIGINS=[...]
+YOUTUBE_API_KEY=...
+INSTAGRAM_SESSION_ID=... # preferred over username/password (bypasses bot detection)
 ```
 
-### Frontend (`frontend/.env`)
-
-```env
-VITE_API_URL=http://localhost:8000/api/v1
-```
+Frontend: `VITE_API_URL=http://localhost:8000/api/v1` (`frontend/.env`).
 
 ---
 
-## 12. Sample Requests & Responses
+## 11. Tech Stack — What Each Piece Does and Why
 
-### Login
+### Backend runtime
 
-**Request**
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
+| Technology | Role in this project | Why it was chosen |
+|---|---|---|
+| **Python 3.11** | Language the entire backend and ML pipeline is written in | Required by the HuggingFace/PyTorch ecosystem; best library support for NLP |
+| **FastAPI 0.115** | Web framework — defines every `/api/v1/*` route, request/response validation, auto-generated docs at `/docs` | Async-native, integrates natively with Pydantic for typed request/response models, minimal boilerplate compared to Flask/Django |
+| **Uvicorn** | ASGI server that actually runs the FastAPI app (`uvicorn main:app`) | The standard production-grade server for async Python web apps |
+| **Pydantic 2 / pydantic-settings** | Validates every request body against a schema (`schemas/`) and loads `backend/.env` into a typed `Settings` object (`config.py`) | Catches malformed input before it reaches business logic; typed config avoids `os.environ` string-soup |
+| **SQLAlchemy 2.0** | ORM — defines the four tables (`database/models.py`) and generates SQL for every query | Lets the app swap SQLite for Postgres/MySQL later without rewriting queries |
+| **SQLite** | The actual database file (`sentiment_platform.db`) | Zero-config, single-file — appropriate for a project of this scale; no separate DB server to install |
+| **python-jose** | Encodes/decodes the JWT access tokens issued on login (`auth/deps.py`) | Standard, well-audited JWT implementation for Python |
+| **passlib + bcrypt** | Hashes and verifies user passwords before they touch the database | Never store or compare plaintext passwords; bcrypt is the industry-standard slow hash resistant to brute force |
 
-{"username": "admin", "password": "admin123"}
-```
+### AI / ML layer
 
-**Response**
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer",
-  "user": {
-    "id": "a1b2c3...",
-    "username": "admin",
-    "email": "admin@sentimentiq.com",
-    "role": "admin",
-    "created_at": "2025-06-11T10:00:00"
-  }
-}
-```
+| Technology | Role in this project | Why it was chosen |
+|---|---|---|
+| **HuggingFace Transformers 4.44** | Loads and runs every pretrained BERT/RoBERTa model used in the pipeline (sentiment, sarcasm, emotion, tone/intent) | The de-facto standard library for using pretrained NLP models without writing custom model code |
+| **PyTorch (CPU build)** | The actual tensor/inference engine underneath every Transformers model call | Required by Transformers; CPU build keeps the install lightweight since a GPU isn't assumed |
+| **scikit-learn** | Trains the Logistic Regression head on top of DistilBERT embeddings (`modules/sentiment.py`) and re-trains it when admins submit corrections | Fast, simple, interpretable classifier — no need for a second neural network just to combine embeddings into a label |
+| **langdetect** | Step 1 of the pipeline — identifies the input language before anything else runs | Lightweight, no model download, good enough accuracy to route text to the right translation model |
+| **sentencepiece / sacremoses** | Tokenizers required internally by the MarianMT translation models | Mandatory dependencies of Helsinki-NLP's `opus-mt-*` models — without them translation fails to load |
 
----
+### Social media & document integrations
 
-### Admin Stats
+| Technology | Role in this project | Why it was chosen |
+|---|---|---|
+| **google-api-python-client** | Calls the YouTube Data API v3 to fetch a video's metadata and top comments (`modules/url_fetcher.py`) | Official Google client library — handles auth and pagination for you |
+| **curl_cffi** | Fetches Myntra product pages and paginates its internal reviews JSON endpoint (`modules/url_fetcher.py::fetch_myntra_reviews`) | Myntra has no public reviews API and blocks obvious scraper traffic; curl_cffi impersonates a real Chrome TLS fingerprint so requests aren't rejected the way a plain `requests` call would be |
+| **fpdf2** | Generates the branded PDF export (single/bulk/URL analysis reports) | Pure-Python PDF generation with no external binary dependency (unlike wkhtmltopdf-based tools) |
 
-**Request**
-```http
-GET /api/v1/admin/stats
-Authorization: Bearer <admin-token>
-```
+### Frontend runtime
 
-**Response**
-```json
-{
-  "users": {
-    "total": 3,
-    "admins": 1,
-    "regular_users": 2,
-    "list": [
-      {"id": "...", "username": "admin", "email": "admin@sentimentiq.com", "role": "admin", "is_active": true, "created_at": "2025-06-11T10:00:00"},
-      {"id": "...", "username": "alice", "email": null, "role": "user", "is_active": true, "created_at": "2025-06-12T09:30:00"},
-      {"id": "...", "username": "bob", "email": null, "role": "user", "is_active": false, "created_at": "2025-06-13T14:00:00"}
-    ]
-  },
-  "storage": {
-    "db_size_bytes": 204800,
-    "db_size_mb": 0.2,
-    "limit_mb": 500,
-    "usage_pct": 0.04,
-    "analysis_records": 47,
-    "correction_entries": 3,
-    "user_reports": 2,
-    "total_records": 52
-  }
-}
-```
+| Technology | Role in this project | Why it was chosen |
+|---|---|---|
+| **React 18 + TypeScript 5.2** | The entire UI — pages, components, routing | Component model fits a dashboard with many repeated card/table layouts; TypeScript catches API-shape mismatches between frontend and backend at compile time |
+| **Vite 5** | Dev server (`npm run dev`, port 5173) and production bundler | Near-instant hot reload during development, much faster cold-start than Webpack-based tooling |
+| **Tailwind CSS 3** | All component styling, including the theme system (`lib/themes.ts`) | Utility classes keep styling co-located with markup — no separate CSS files to keep in sync per component |
+| **Zustand** | Global client state: JWT token, current user, active theme (`store/index.ts`) | Much less boilerplate than Redux for a store this small; no context-provider wrapping needed |
+| **Axios** | The HTTP client (`lib/api.ts`) that talks to the FastAPI backend, attaching the JWT to every request | Built-in interceptors make it easy to inject the auth header and handle 401s in one place |
+| **Recharts** | Renders the Dashboard's KPI charts, sentiment distribution, trend lines | Declarative, React-native charting API — no manual canvas/SVG wiring |
+| **Framer Motion** | Page/card transition animations throughout the UI | Simple declarative animation API that works naturally with React component lifecycles |
+| **react-dropzone** | Drag-and-drop CSV upload on the Bulk Analysis page | Handles file-drop UX edge cases (drag state, validation, multi-file) that are tedious to hand-roll |
+| **react-hot-toast** | Success/error toast notifications across the app | Lightweight, no provider boilerplate beyond one root component |
+| **lucide-react** | Icon set used throughout the sidebar, cards, and buttons | Consistent, tree-shakeable icon library that matches the app's clean visual style |
+
+### The AI models themselves (see §2 for how they connect)
+
+| Model | What it actually does here |
+|---|---|
+| **DistilBERT-multilingual + Logistic Regression** | Turns text in 104 possible languages into a 768-dim embedding, then a simple linear classifier maps that embedding to positive/negative/neutral (35% of the final sentiment vote) |
+| **Twitter-RoBERTa (sentiment)** | A second, independent sentiment vote (65% weight) — trained on 124M tweets, so it understands informal/emoji-heavy comment text better than a Wikipedia-trained model would |
+| **Twitter-RoBERTa (irony)** | Detects sarcasm; when confident and the sentiment call said "positive," flips it to "negative" (classic sarcasm pattern) |
+| **GoEmotions distilRoBERTa** | Picks the dominant emotion (joy, anger, sadness, etc.) from 7 classes, then gets corrected if it contradicts the sentiment result |
+| **DistilBERT-MNLI** | Answers "does this text entail label X?" for 8 tone labels and 8 intent labels — this is what lets tone/intent detection work with zero task-specific training data |
+| **Google Translate / MarianMT (Helsinki-NLP)** | Translates non-English input into English before the rest of the pipeline runs, so every downstream model only ever has to understand English. Google Translate (no API key, via `deep-translator`) is tried first; MarianMT is the offline fallback |
 
 ---
 
-### Fix a Report
+## 12. Notable Design Decisions
 
-**Request**
-```http
-PATCH /api/v1/reports/abc-123
-Authorization: Bearer <admin-token>
-Content-Type: application/json
-
-{"status": "fixed", "correct_label": "negative", "keywords": ["terrible", "awful"]}
-```
-
-**Response**
-```json
-{
-  "id": "abc-123",
-  "text": "Wow this is just amazing...",
-  "model_label": "positive",
-  "user_note": "This is sarcastic, should be negative",
-  "status": "fixed",
-  "reporter_username": "alice",
-  "created_at": "2025-06-14T11:00:00",
-  "reviewed_at": "2025-06-16T09:30:00"
-}
-```
+- **Ensemble weighting (35/65):** Twitter-RoBERTa gets more weight because comments/reviews resemble its tweet training domain more than DistilBERT's Wikipedia pretraining; DistilBERT+LR adds multilingual coverage RoBERTa lacks.
+- **Sarcasm-driven sentiment flip:** Runs only after the base sentiment call, and is explicitly skipped when the label came from a human correction — corrections always take precedence over model heuristics.
+- **Emotion/sentiment alignment:** Emotion model runs independently of sentiment, so a post-processing step forces the top emotion to stay compatible with the sentiment polarity (no "Joy" on a "Negative" result).
+- **Correction cache is the fast path:** Once a text is corrected, `analyze_text()` short-circuits the entire model ensemble for that exact text — cheap and immediate, not a retraining requirement.
+- **Corrections persist across restarts:** reloaded from the `correction_entries` table into memory in the FastAPI `lifespan` handler on every boot.
+- **Myntra scraping via TLS-impersonated HTTP session**, not a public API (none exists) — `curl_cffi`'s Chrome-120 impersonation avoids the bot-detection that a plain HTTP client would trigger against Myntra's reviews endpoint.
+- **Translation has two layers**: Google Translate (via `deep-translator`, no API key) is tried first for broad language coverage, with MarianMT as an offline fallback for a fixed set of languages if Google Translate fails or is unreachable.
+- **Default admin account** (`admin` / `admin123`) is auto-seeded on first database initialization (`database/connection.py::_seed_admin`) so the app is usable immediately — the login page also displays this credential as a hint.
 
 ---
 
-### Single Analysis
+## 13. File-by-File Reference
 
-**Request**
-```http
-POST /api/v1/analyze
-Authorization: Bearer <token>
-Content-Type: application/json
+### Backend — entry point & config
 
-{"text": "This product is absolutely amazing! Delivered fast and works perfectly."}
-```
+| File | What it does |
+|---|---|
+| `backend/main.py` | Creates the FastAPI app, registers CORS, mounts every router under `/api/v1`, and defines the `lifespan` startup hook: initializes the DB, eagerly loads all ML models (`initialize_models()`), then reloads any persisted `CorrectionEntry` rows into the in-memory correction cache so admin fixes survive a restart. Also defines `/health`, `/`, and global exception handlers for `ValueError` (→ 400) and any other exception (→ 500). |
+| `backend/config.py` | Defines the `Settings` (Pydantic) class loaded from `backend/.env` — DB URL, model cache dir, device (`auto`/`cuda`/`cpu`), JWT secret/algorithm/expiry, CORS origins, YouTube API key. Resolves `DEVICE=auto` to `cuda`/`cpu` at import time based on `torch.cuda.is_available()`. |
 
-**Response**
-```json
-{
-  "id": "a1b2c3d4-...",
-  "original_text": "This product is absolutely amazing! ...",
-  "detected_language": "English",
-  "language_code": "en",
-  "translated_text": "This product is absolutely amazing! ...",
-  "is_translation": false,
-  "sentiment": {"label": "positive", "confidence": 0.95, "probabilities": {"positive": 0.95, "negative": 0.03, "neutral": 0.02}},
-  "sarcasm": {"detected": false, "confidence": 0.12},
-  "emotion": {"label": "Joy", "confidence": 0.89, "scores": {"Joy": 0.89, "Excitement": 0.07, "Neutral": 0.02, "Appreciation": 0.02}},
-  "tone": {"label": "appreciative", "intensity": 0.82, "scores": {...}},
-  "intent": {"label": "appreciation", "confidence": 0.78, "scores": {...}},
-  "interpretation": "The reviewer expresses a strongly positive sentiment...",
-  "suggested_response": "Thank you so much for your wonderful feedback!...",
-  "processing_time": 1.234,
-  "timestamp": "2025-06-16T10:30:45.123Z",
-  "word_count": 12,
-  "char_count": 71
-}
-```
+### Backend — auth
 
----
+| File | What it does |
+|---|---|
+| `auth/deps.py` | All auth primitives: `hash_password`/`verify_password` (bcrypt via passlib), `create_access_token`/`_decode_token` (JWT via python-jose), and three FastAPI dependencies — `get_current_user` (401 if no/invalid token), `get_optional_user` (returns `None` instead of raising, used for anonymous report submission), `require_admin` (403 if `role != "admin"`). |
 
-*Updated: 2026-06-19*
+### Backend — AI/ML pipeline (`modules/`)
+
+| File | What it does |
+|---|---|
+| `modules/pipeline.py` | The orchestrator. `analyze_text()` runs all 8 stages in order and assembles the final result dict. Contains `_lookup_correction()` (checks the correction cache by original text, translated text, then case-insensitive match) and `_align_emotion_with_sentiment()` (the `_SENTIMENT_EMOTION_COMPAT` post-processing step that keeps emotion labels compatible with sentiment polarity). Also exposes `initialize_models()`, called once at startup to warm up every singleton detector so the first real request isn't slow. |
+| `modules/language_detector.py` | `detect_language()` wraps `langdetect` and maps ISO codes to display names (`LANGUAGE_NAMES`). `is_hinglish()` detects Devanagari-script Hindi mixed with Latin characters by character-ratio. `is_romanized_hinglish()` detects Hindi written in Roman script by matching ≥2 common Hindi function words (`_ROMANIZED_HINDI_WORDS`, a ~90-word list) against ≥15% of the text's alphabetic tokens — this is what tells the pipeline to skip MarianMT (which can't handle romanized Hindi) and let multilingual BERT handle it directly. |
+| `modules/translation.py` | `translate_to_english()` is the single entry point: returns immediately for English text, otherwise tries `_google_translate()` (via `deep_translator.GoogleTranslator`, no key needed) first, then falls back to `_marian_translate()` for the fixed set of languages in `_MARIAN_MODELS`. MarianMT models are lazily loaded and cached in `_marian_cache` on first use per language. |
+| `modules/sentiment.py` | The core classifier. Defines `SEED_DATA` (60 hand-written examples spanning formal/informal/emoji text across positive/negative/neutral) and emoji sets (`_POSITIVE_EMOJIS`/`_NEGATIVE_EMOJIS`). The `BERTLogisticSentimentAnalyzer` singleton: `_get_embedding()` mean-pools DistilBERT's last hidden state; `_train_lr()` fits the Logistic Regression head on `SEED_DATA` at startup; `analyze()` checks the correction cache first, then blends LR probabilities (35%) with the Twitter-RoBERTa pipeline (65%), applies the emoji signal and keyword-signal adjustments from corrections, normalizes, and applies a confidence floor (<55%→neutral) plus a negative/neutral margin guard. `apply_single_correction()` does an immediate cache-only update; `retrain_with_corrections()` refits the LR head on seed+correction data and rebuilds both caches; `load_online_data()` pulls extra labeled samples from HuggingFace's `tweet_eval` and `tyqiangz/multilingual-sentiments` datasets to enrich training data on demand. |
+| `modules/sarcasm.py` | `SarcasmDetector` singleton wrapping `cardiffnlp/twitter-roberta-base-irony`. `analyze()` returns `detected=True` only when the model's `irony` label scores ≥ `SARCASM_THRESHOLD` (0.70). |
+| `modules/emotion.py` | `EmotionDetector` singleton wrapping the GoEmotions distilRoBERTa model. Maps the model's raw 7 labels to nicer display labels (`EMOTION_DISPLAY`, e.g. `sadness`→`Disappointment`, `surprise`→`Excitement`), taking the max score when two raw labels collapse to the same display label. |
+| `modules/tone.py` / `modules/intent.py` | Near-identical `ToneDetector`/`IntentDetector` singletons, both wrapping the same `typeform/distilbert-base-uncased-mnli` zero-shot classifier pipeline but with different candidate label sets (`TONE_LABELS` vs `INTENT_LABELS`) and (for tone) natural-language hypothesis templates (`TONE_HYPOTHESES`) fed into the zero-shot NLI call. |
+| `modules/interpretation.py` | Pure function `generate_interpretation()` — no model calls. Stitches together a human-readable paragraph from sentiment/emotion/tone/intent labels using lookup dicts (`sent_map`, `emotion_intent_map`) and simple keyword extraction (`positive_keywords`/`negative_keywords`) against the translated text. |
+| `modules/response_generator.py` | Pure function `generate_response()` — looks up `RESPONSE_TEMPLATES` keyed by `(sentiment, intent, tone)` tuples, falling back to partial `(sentiment, intent)` match, then sentiment-only match, then `DEFAULT_RESPONSES`. Each match has multiple template variants chosen at random via `random.choice`. |
+| `modules/analytics.py` | `get_analytics()` queries the last N `AnalysisRecord` rows and computes: label distributions (sentiment/emotion/tone/intent/language) via `Counter`, average confidence, a 30-day trend series bucketed by date, a stopword-filtered word-frequency cloud (`top_words`), and the 10 most recent reviews. `generate_ai_insight()` turns those aggregates into a short natural-language summary paragraph (e.g. flags when negative feedback exceeds 50%, or when "complaint" is the dominant intent). |
+| `modules/url_fetcher.py` | `detect_platform()` inspects the URL host to route to `youtube` or `myntra` (raises `ValueError` for anything else). `fetch_youtube_comments()` uses `google-api-python-client` to pull video metadata and paginate `commentThreads.list` up to `max_comments`. `fetch_myntra_reviews()` uses `curl_cffi` (Chrome-120 TLS impersonation) to load the product page for its title, extract the numeric product ID from the URL, then paginate Myntra's internal `/web/v1/reviews/product/{id}` JSON endpoint. `fetch_comments()` is the single public entry point used by the router. |
+| `modules/pdf_generator.py` | Three report builders (`generate_single_analysis_pdf`, `generate_bulk_analysis_pdf`, `generate_url_analysis_pdf`) built on a custom `_PDF(FPDF)` subclass with helpers for colored header bars, progress bars (`h_bar`), and bordered "cards". Each report renders key metrics, sentiment/emotion distribution bars, highlighted best/worst examples, and a full per-item results table. `_safe()` sanitizes text to latin-1 (fpdf2's charset) and truncates long strings. |
+
+### Backend — routers (`routers/`, all mounted under `/api/v1`)
+
+| File | What it does |
+|---|---|
+| `routers/analysis.py` | `POST /analyze` — validates length (≤5000 chars), calls `analyze_text()`, persists the result as a background task (`save_analysis_to_db`, defined here) so the DB write doesn't block the response. |
+| `routers/bulk.py` | `POST /bulk-analyze` — runs up to 100 texts through the pipeline sequentially, persisting each and computing an `aggregate` summary (distributions + dominants + average confidence). Failed items get a placeholder neutral result instead of aborting the whole batch. `POST /upload-csv` — parses an uploaded CSV (UTF-8 then latin-1 fallback), heuristically picks a text column (`text`/`review`/`comment`/`feedback`/`content`/`message`, else the first column), and returns up to 500 extracted rows as plain text for the frontend to feed into bulk-analyze. |
+| `routers/analytics.py` | `GET /analytics` — thin wrapper that just calls `modules/analytics.get_analytics()`. |
+| `routers/history.py` | `GET /history` (paginated, filterable by sentiment/emotion/language/text search), `GET /history/{id}`, `DELETE /history/{id}`, `DELETE /history` (wipe all). Directly serializes `AnalysisRecord` rows into the nested response shape the frontend expects. |
+| `routers/url_analysis.py` | `POST /analyze-url` — calls `fetch_comments()`, runs every comment/review through `analyze_text()`, persists each as an `AnalysisRecord` with `mode="url"`, and returns post metadata + per-item results + aggregate stats, mirroring `bulk.py`'s aggregation logic. |
+| `routers/export.py` | Three endpoints (`/export-pdf`, `/export-pdf/single`, `/export-pdf/bulk`) that each call the matching `pdf_generator` function and stream the bytes back with a `Content-Disposition: attachment` header and a timestamped filename. |
+| `routers/auth.py` | `POST /auth/register` (checks username/email uniqueness, hashes password, issues JWT), `POST /auth/login` (verifies password, 403s if `is_active=False`, issues JWT), `GET /auth/me` (returns the current authenticated user). |
+| `routers/corrections.py` | Admin-only CRUD over `CorrectionEntry`: `POST /corrections` (create + immediately push into the in-memory cache via `apply_single_correction`), `GET /corrections`, `GET /corrections/stats` (label breakdown, top keywords, `needs_retrain` flag at `RETRAIN_THRESHOLD=20`), `DELETE /corrections/{id}`, `GET /corrections/online-status`, `POST /corrections/fetch-online` (triggers `load_online_data`), `POST /corrections/retrain` (triggers `retrain_with_corrections` on all stored corrections). |
+| `routers/reports.py` | `POST /reports` (any user or anonymous — `get_optional_user`), `GET /reports` and `/reports/stats` (admin), `PATCH /reports/{id}` (admin review: setting `status="fixed"` with a `correct_label` auto-creates a `CorrectionEntry`, retroactively updates every matching `AnalysisRecord` row so History reflects the fix immediately, and pushes the fix into the live correction cache), `DELETE /reports/{id}`. |
+| `routers/admin.py` | Admin-only: `GET /admin/stats` (user list + counts, SQLite file size vs. a 500MB soft cap via `_db_file_size()`, record counts across all three tables), `PATCH /admin/users/{id}/restrict` (toggle `is_active`, blocked for self), `DELETE /admin/users/{id}` (blocked for self), `DELETE /admin/clear-analysis`, `DELETE /admin/clear-all`. |
+
+### Backend — database & schemas
+
+| File | What it does |
+|---|---|
+| `database/connection.py` | Creates the SQLAlchemy `engine`/`SessionLocal`/`Base`. `init_db()` creates all tables, runs `_migrate_users_table()` (adds the `is_active` column via raw `ALTER TABLE` if missing — a lightweight SQLite migration since there's no Alembic), and `_seed_admin()` (creates the default `admin`/`admin123` account if no admin exists yet). `get_db()` is the standard FastAPI session-per-request dependency. |
+| `database/models.py` | Four SQLAlchemy models: `User` (auth + role + `is_active`), `UserReport` (mis-classification reports with lifecycle status), `CorrectionEntry` (admin-approved label fixes + keywords), `AnalysisRecord` (every analysis result, flattened into columns per signal, with `mode`/`batch_id` to distinguish single/bulk/url runs). |
+| `schemas/analysis.py` | Pydantic request/response models mirroring the pipeline's result dict: `SentimentResult`, `SarcasmResult`, `EmotionResult`, `ToneResult`, `IntentResult`, `AnalysisRequest`, `BulkAnalysisRequest`, `SingleAnalysisResponse`, `BulkAnalysisItem`/`BulkAnalysisResponse`, `AnalyticsResponse`. |
+| `schemas/auth.py` | `RegisterRequest` (username/password/email with length validation), `LoginRequest`, `TokenResponse` (access token + embedded `UserOut`), `UserOut`. |
+| `schemas/corrections.py` | `CorrectionCreate` (label constrained to `positive|negative|neutral` via regex), `CorrectionResponse`, `CorrectionStats`, `RetrainResponse`. |
+| `schemas/reports.py` | `ReportCreate`, `ReportResponse`, `ReportReview` (status constrained to `reviewed|fixed`, optional `correct_label`/`keywords`). |
+| `schemas/url_analysis.py` | `URLAnalysisRequest` (validates non-empty URL, clamps `max_comments` to 5–100), `PostMetadata`, `URLAnalysisResponse` (reuses `BulkAnalysisItem` for its `items` list). |
+
+### Frontend — app shell & infrastructure
+
+| File | What it does |
+|---|---|
+| `App.tsx` | Defines all routes with `react-router-dom`. `RequireAuth` redirects to `/login` if there's no token; `RequireAdmin` redirects to `/dashboard` if the user's role isn't `admin` (client-side guard only — the backend still enforces 401/403 independently). `ThemeApplier` re-applies the active theme's CSS variables on mount/change. `ClearAuthOnStartup` logs the user out on every fresh app load (so a stale token doesn't silently persist across browser sessions). |
+| `store/index.ts` | The single Zustand store (`useAppStore`). Holds: last analysis results for each mode (single/bulk/URL), analytics cache, loading flags, sidebar collapsed state, active theme ID, the correction-panel's open/prefill/section state, and auth state (`user`/`token`, persisted to `localStorage` under `sentimentiq_token`/`sentimentiq_user`). `loginUser()`/`logoutUser()` write/clear localStorage alongside in-memory state. |
+| `lib/api.ts` | The only place that talks to the backend. One `axios` instance with a request interceptor that attaches `Authorization: Bearer <token>` from localStorage, and a response interceptor that unwraps FastAPI's `{detail: "..."}` error shape (including from Blob error responses on PDF export calls) into a plain `Error`. Exports one typed function per backend endpoint (`analyzeText`, `bulkAnalyze`, `uploadCSV`, `getAnalytics`, `getHistory`, `analyzeURL`, the three `export*PDF` functions plus a shared `_downloadPdf` helper, all `*Correction*`/`*Report*`/`*Admin*` functions, and auth functions). |
+| `lib/themes.ts` | Defines 5 color themes (`aurora`, `ocean`, `rose`, `emerald`, `amber`) as CSS-variable sets (`primary`/`secondary`/`accent` + 4 "aurora blob" gradient colors used for the background). `applyTheme()` writes them onto `document.documentElement` as CSS custom properties; `getTheme()`/`DEFAULT_THEME_ID` handle lookup/fallback. |
+| `lib/utils.ts` | Small pure helpers: `cn()` (clsx + tailwind-merge class combiner), `getSentimentColor`/`getSentimentBg`/`getEmotionColor` (label→color/class lookups used across every result card), `formatConfidence`, `truncateText`, `formatDate`, `capitalize`. |
+| `types/index.ts` | The single source of truth for all API response shapes on the frontend — `User`, `UserReport`, `ReportStats`, `SentimentResult`/`SarcasmResult`/`EmotionResult`/`ToneResult`/`IntentResult`, `SingleAnalysisResponse`, `BulkAnalysisItem`/`BulkAnalysisResponse`, `AnalyticsData`, `PostMetadata`/`URLAnalysisResponse`, `AdminUserEntry`/`AdminStats`, `CorrectionEntry`/`CorrectionStats`, `HistoryRecord`. Kept in sync by hand with the backend's Pydantic schemas. |
+| `components/Layout.tsx` | The authenticated app shell — renders the animated "aurora blob" background (using the active theme's CSS variables), the `Sidebar`, and an `Outlet` for the current page, shifting its left margin based on whether the sidebar is collapsed. |
+| `components/Sidebar.tsx` | The main nav rail. Polls `/health` every 30s to show a live "Backend Connected/Offline" pill, and (for admins) polls `/reports/stats` every 15s to show a pending-report count badge on the "User Reports" link. Shows/hides the Admin Overview, Training Data, and User Reports links based on `user.role`. Collapsible via an animated width toggle (Framer Motion). |
+| `components/BackendStatus.tsx` | A standalone connected/offline pill + manual refresh button around `checkHealth()` — a smaller, reusable variant of the status indicator embedded in the Sidebar. |
+| `components/ReportModal.tsx` | The "Report incorrect analysis" dialog shown to any user from an analysis result card. Submits `{text, model_label, user_note}` to `POST /reports` and shows a success state before auto-closing. |
+| `components/CorrectionPanel.tsx` | The large admin-only slide-over panel with two sections (`training` / `reports`, switched via the store's `correctionPanelSection`): the **training** section lets an admin submit a correction directly, shows correction-count progress toward the retrain threshold, triggers `POST /corrections/retrain`, and can pull in HuggingFace online datasets via `POST /corrections/fetch-online`; the **reports** section lists pending/reviewed/fixed `UserReport`s with inline "Mark Reviewed" / "Fix & Add to Dataset" actions (the latter requires picking a correct label first). |
+| `components/analysis/*.tsx` | Small presentational cards, one per pipeline signal, each taking that signal's typed result and rendering a labeled badge/score bar: `SentimentCard`, `EmotionCard`, `ToneCard`, `IntentCard`, `LanguageCard`, `InterpretationCard`, `ResponseCard`. Reused across `SingleAnalysis`, `BulkAnalysis`, and `URLAnalysis`. |
+| `components/ui/*.tsx` | Generic design-system primitives shared everywhere: `Button` (variants + loading spinner + icon slot), `Card`/`CardHeader`/`CardTitle`, `Input`, `Textarea`, `Select`, `Badge`, `Progress`, `Skeleton` (incl. `AnalysisCardSkeleton` loading placeholder), `Toast` (react-hot-toast wrapper). |
+
+### Frontend — pages (`pages/`)
+
+| File | What it does |
+|---|---|
+| `Login.tsx` | Combined login/register form (tab-toggled). Calls `loginUser`/`registerUser`, stores the returned token+user via the Zustand store, and redirects to `/dashboard`. Displays the default `admin`/`admin123` credential as an on-screen hint. |
+| `Dashboard.tsx` | Fetches `getAnalytics()` and renders KPI cards, sentiment/emotion/tone/intent distribution charts (Recharts), a 30-day trend line, a keyword cloud from `top_words`, the AI-generated insight paragraph, and a recent-reviews list. |
+| `SingleAnalysis.tsx` | The primary single-text workflow: textarea + example prompts (including Hindi/Hinglish samples) → `analyzeText()` → renders all seven per-signal cards → supports PDF export (`exportSingleAnalysisPDF`) and opening `ReportModal` to flag a wrong result. |
+| `BulkAnalysis.tsx` | Textarea (newline-separated) or CSV upload (`uploadCSV`) → `bulkAnalyze()` → results table with per-row sentiment/emotion/tone/intent, aggregate summary, PDF export (`exportBulkAnalysisPDF`), and per-row report flagging. |
+| `URLAnalysis.tsx` | URL input (YouTube or Myntra) → `analyzeURL()` (long timeout — up to 10 minutes for large comment/review counts) → post metadata header + aggregate summary + per-comment results table, PDF export (`exportURLAnalysisPDF`). |
+| `History.tsx` | Paginated, filterable (sentiment/emotion/language/search) table over `getHistory()`, with per-record delete (`deleteHistoryRecord`) and a "clear all" action (`clearHistory`). |
+| `Settings.tsx` | Theme picker (swaps between the 5 `THEMES`) and a backend health check panel (`checkHealth`). |
+| `TrainingData.tsx` | Admin-only standalone page wrapping the same correction-management functionality as `CorrectionPanel`'s training section — correction submission, stats, retrain trigger, online-dataset fetch, recent corrections list. |
+| `UserReports.tsx` | Admin-only standalone page for reviewing user-submitted mis-classification reports (list, stats, filter by status, review/fix/delete actions) — a full-page counterpart to `CorrectionPanel`'s reports section. |
+| `AdminOverview.tsx` | Admin-only dashboard: user list with restrict/delete actions (`restrictUser`, `deleteUser`), storage usage gauge and record counts (`getAdminStats`), and destructive data-wipe actions (`clearAnalysisRecords`, `clearAllData`). |
