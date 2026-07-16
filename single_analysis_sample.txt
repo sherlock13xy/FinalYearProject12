@@ -1,0 +1,48 @@
+# Single Analysis — Demo Samples
+# Paste ONE block's text (the line below its label) into the Single Analysis text box at a time.
+# Each label notes which pipeline feature that example is meant to showcase during the viva.
+
+[Positive / Praise / Appreciative tone]
+The customer support team resolved my issue within minutes. Absolutely fantastic service, thank you!
+
+[Negative / Complaint]
+This is the third time my order has arrived late and no one from support has bothered to respond.
+
+[Neutral / Informational]
+The package arrived on Tuesday. It contained the item I ordered along with the invoice.
+
+[Sarcasm -> should flip Positive to Negative]
+Oh great, another delay. Just what I needed on the one day I actually had plans.
+
+[Emoji-heavy signal]
+Loved it so much 😍😍 best purchase ever!! 100% recommend to everyone 🙌🔥
+
+[Mixed / ambiguous sentiment]
+The camera quality is great but the battery drains so fast it's almost unusable by evening.
+
+[Inquiry intent]
+Does this plan include international roaming, or do I need to buy a separate add-on?
+
+[Request intent]
+Could you please extend the return window by a few more days? I'm still deciding.
+
+[Displeasure with implied consequence — edge case for intent detection]
+If this keeps happening I'm cancelling my subscription and switching to a competitor.
+
+[Hindi — Devanagari script]
+यह उत्पाद बहुत बेकार है, पैसे बिल्कुल बर्बाद हो गए।
+
+[Hinglish — Romanized Hindi, skips MarianMT]
+Ye product bahut hi badhiya hai yaar, delivery bhi time par ho gayi!
+
+[Bengali]
+এই পরিষেবাটি সত্যিই দুর্দান্ত ছিল, আমি খুব খুশি।
+
+[French]
+Le service client a été incroyablement lent et personne n'a répondu à mes emails.
+
+[Formal / professional tone]
+We regret to inform you that the shipment has been delayed due to unforeseen logistics issues.
+
+[Casual / informal tone]
+lol this app is actually kinda broken ngl, keeps crashing every time I open it
